@@ -130,6 +130,8 @@ async def audio_stream(room_id: str, websocket: WebSocket):
 
     translation_task = asyncio.create_task(translation_worker())
     try:
+        room = store.get_room(room_id)
+        stt_language = room.source_language if room else None
         use_gemini = (
             settings.llm_provider == "gemini"
             and settings.llm_api_key
@@ -151,14 +153,14 @@ async def audio_stream(room_id: str, websocket: WebSocket):
             if overflowed:
                 logger.warning("Audio buffer overflow: room=%s", room_id)
             for frame in frames:
-                logger.info("Audio frame ready: room=%s bytes=%s", room_id, len(frame))
+                logger.debug("Audio frame ready: room=%s bytes=%s", room_id, len(frame))
                 if gemini_session:
                     await gemini_session.send_audio(frame)
                     continue
                 if stt_engine and vad_segmenter:
                     segments = vad_segmenter.push(frame)
                     for segment in segments:
-                        text = await stt_engine.transcribe(segment)
+                        text = await stt_engine.transcribe(segment, language=stt_language)
                         if text:
                             await handle_transcription(text)
                     continue
@@ -172,7 +174,7 @@ async def audio_stream(room_id: str, websocket: WebSocket):
             await gemini_session.close()
         if stt_engine and vad_segmenter:
             for segment in vad_segmenter.flush():
-                text = await stt_engine.transcribe(segment)
+                text = await stt_engine.transcribe(segment, language=stt_language)
                 if text:
                     await handle_transcription(text)
         await translation_queue.put(None)

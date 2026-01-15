@@ -27,7 +27,10 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   const [transcription, setTranscription] = useState("");
   const [translation, setTranslation] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [isActive, setIsActive] = useState(true);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [showOriginal, setShowOriginal] = useState(true);
   const [status, setStatus] = useState<RoomStatus>('connecting');
   const [downloaded, setDownloaded] = useState(false);
   const [supported, setSupported] = useState<SupportedLanguages>({
@@ -49,6 +52,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextAudioTimeRef = useRef(0);
   const pendingAudioRef = useRef<Array<{ audio: string; sampleRate: number }>>([]);
+  const isAudioEnabledRef = useRef(isAudioEnabled);
 
   const ensureAudioContext = () => {
     if (!audioContextRef.current) {
@@ -204,7 +208,12 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   };
 
   useEffect(() => {
+    isAudioEnabledRef.current = isAudioEnabled;
+  }, [isAudioEnabled]);
+
+  useEffect(() => {
     const handleFirstInteraction = () => {
+      if (!isAudioEnabledRef.current) return;
       const audioContext = ensureAudioContext();
       void audioContext.resume().then(() => {
         flushPendingAudio();
@@ -230,6 +239,13 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (isAudioEnabled) return;
+    pendingAudioRef.current = [];
+    pendingAudioStartsRef.current = [];
+    resetAudioQueue();
+  }, [isAudioEnabled]);
 
   const availableTargets = filterTargetLanguages(sourceLang.code, supported, LANGUAGES);
   const fallbackTarget = availableTargets[0] ?? LANGUAGES[0];
@@ -291,7 +307,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
           ? enqueueTranslation(payload.packet.text)
           : undefined,
       onTts: (payload) => {
-        if (!isActive) return;
+        if (!isActive || !isAudioEnabledRef.current) return;
         if (payload.targetLanguage?.code !== targetLang.code) return;
         const startAt = scheduleAudioPlayback(payload.audio, payload.sampleRate);
         if (startAt !== null) {
@@ -312,7 +328,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   }, [isActive, session.id, targetLang.code]);
 
   const handleToggleActive = () => {
-    if (!isActive) {
+    if (!isActive && isAudioEnabled) {
       ensureAudioContext();
     }
     setIsActive((prev) => !prev);
@@ -357,6 +373,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
         <div className="flex flex-col items-center gap-2">
           <button
             onClick={handleToggleActive}
+            aria-label={isActive ? 'Остановить прием' : 'Начать прием'}
             className="w-16 h-16 bg-white rounded-full flex items-center justify-center hover:bg-gray-200 transition-all shadow-xl group"
           >
             <Play className="w-7 h-7 text-black fill-current group-hover:scale-110 transition-transform" />
@@ -420,11 +437,44 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
         </div>
 
         {/* Settings Icon */}
-        <div className="flex flex-col items-center gap-2">
-          <button className="w-16 h-16 flex items-center justify-center text-gray-500 hover:text-white transition-colors">
+        <div className="relative flex flex-col items-center gap-2 px-2">
+          <button
+            onClick={() => setShowSettings((prev) => !prev)}
+            aria-label="Настройки слушателя"
+            className="w-16 h-16 flex items-center justify-center text-gray-500 hover:text-white transition-colors"
+          >
             <Settings className="w-8 h-8" />
           </button>
           <div className="h-4" />
+          {showSettings && (
+            <div className="absolute top-16 right-0 z-[90] w-72 rounded-3xl border border-white/10 bg-[#0A0A0A]/95 backdrop-blur-xl shadow-[0_0_40px_rgba(0,0,0,0.4)] p-4 text-sm text-gray-200">
+              <div className="text-xs uppercase tracking-[0.2em] text-gray-500 mb-3">Настройки слушателя</div>
+              <label className="flex items-center justify-between gap-3 py-1">
+                <span>Озвучка перевода</span>
+                <input
+                  type="checkbox"
+                  checked={isAudioEnabled}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setIsAudioEnabled(next);
+                    if (next && isActive) {
+                      ensureAudioContext();
+                    }
+                  }}
+                  className="accent-[#00A3FF]"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 py-1">
+                <span>Показывать оригинал</span>
+                <input
+                  type="checkbox"
+                  checked={showOriginal}
+                  onChange={(e) => setShowOriginal(e.target.checked)}
+                  className="accent-[#00A3FF]"
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Connection Status */}
@@ -438,13 +488,19 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
       </div>
 
       {/* Main Content Side-by-Side Boxes */}
-      <div className="w-full max-w-[1200px] grid grid-cols-1 md:grid-cols-2 gap-10 pb-20">
+      <div
+        className={`w-full max-w-[1200px] grid grid-cols-1 ${
+          showOriginal ? 'md:grid-cols-2' : 'md:grid-cols-1'
+        } gap-10 pb-20`}
+      >
         {/* Left Box (Original) */}
-        <div className="relative md:h-[450px] bg-[#0A0A0A] border border-white/10 rounded-[50px] p-8 sm:p-12 lg:p-16 max-h-[60vh] md:max-h-[450px] overflow-y-auto flex items-start justify-center text-center shadow-[0_0_80px_rgba(255,255,255,0.05)]">
-          <p className="text-white text-lg sm:text-xl lg:text-2xl leading-relaxed font-light tracking-wide max-w-md text-reveal">
-            {transcription}
-          </p>
-        </div>
+        {showOriginal && (
+          <div className="relative md:h-[450px] bg-[#0A0A0A] border border-white/10 rounded-[50px] p-8 sm:p-12 lg:p-16 max-h-[60vh] md:max-h-[450px] overflow-y-auto flex items-start justify-center text-center shadow-[0_0_80px_rgba(255,255,255,0.05)]">
+            <p className="text-white text-lg sm:text-xl lg:text-2xl leading-relaxed font-light tracking-wide max-w-md text-reveal">
+              {transcription}
+            </p>
+          </div>
+        )}
 
         {/* Right Box (Translation) */}
         <div className="relative md:h-[450px] bg-[#050505] border border-[#00A3FF]/40 rounded-[50px] p-8 sm:p-12 lg:p-16 max-h-[60vh] md:max-h-[450px] overflow-y-auto flex items-start justify-center text-center shadow-[0_0_80px_rgba(0,163,255,0.2)]">

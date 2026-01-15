@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Logo } from './Logo';
 import { Language, RoomSession, RoomStatus } from '../types';
-import { Mic, MicOff, Settings, Link, Check, LogOut } from 'lucide-react';
+import { Mic, MicOff, Settings, Link, Check, LogOut, Play, Square } from 'lucide-react';
 import { RealtimeClient } from '../services/realtimeClient';
 import { AudioProcessingOptions, AudioSender } from '../services/audioSender';
 
@@ -13,11 +13,13 @@ interface LecturerViewProps {
 }
 
 export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onUpdateLanguage }) => {
+  const [isSessionActive, setIsSessionActive] = useState(false);
   const [isMicOn, setIsMicOn] = useState(false);
   const [transcription, setTranscription] = useState("");
   const [status, setStatus] = useState<RoomStatus>('stopped');
   const [copied, setCopied] = useState(false);
   const [showMicSettings, setShowMicSettings] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [audioSettings, setAudioSettings] = useState<AudioProcessingOptions>({
     echoCancellation: true,
     noiseSuppression: true,
@@ -28,6 +30,8 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
   });
   const clientRef = useRef<RealtimeClient | null>(null);
   const audioRef = useRef<AudioSender | null>(null);
+  const isSessionActiveRef = useRef(isSessionActive);
+  const isMicOnRef = useRef(isMicOn);
 
   useEffect(() => {
     return () => {
@@ -35,6 +39,14 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
       clientRef.current?.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    isSessionActiveRef.current = isSessionActive;
+  }, [isSessionActive]);
+
+  useEffect(() => {
+    isMicOnRef.current = isMicOn;
+  }, [isMicOn]);
 
   useEffect(() => {
     clientRef.current?.disconnect();
@@ -50,6 +62,11 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
       onStatus: (payload) => setStatus(payload.status),
       onError: () => setStatus('stopped')
     });
+    if (isSessionActiveRef.current) {
+      setStatus('connecting');
+      setTranscription('');
+      clientRef.current?.connect();
+    }
   }, [session.id, session.sourceLanguage.code, session.targetLanguage.code]);
 
   useEffect(() => {
@@ -58,24 +75,35 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
       roomId: session.id,
       processing: audioSettings
     });
-    if (isMicOn) {
+    if (isSessionActiveRef.current && isMicOnRef.current) {
       audioRef.current.start();
     }
   }, [session.id, audioSettings]);
 
   useEffect(() => {
-    if (!isMicOn) {
-      audioRef.current?.stop();
+    if (!isSessionActive) {
       clientRef.current?.disconnect();
+      audioRef.current?.stop();
       setStatus('stopped');
+      setTranscription('');
       return;
     }
-
     setStatus('connecting');
     setTranscription('');
     clientRef.current?.connect();
-    audioRef.current?.start();
-  }, [isMicOn]);
+  }, [isSessionActive]);
+
+  useEffect(() => {
+    if (!isSessionActive) {
+      audioRef.current?.stop();
+      return;
+    }
+    if (isMicOn) {
+      audioRef.current?.start();
+    } else {
+      audioRef.current?.stop();
+    }
+  }, [isMicOn, isSessionActive]);
 
   const handleCopyLink = () => {
     const url = `${window.location.origin}/room/${session.id}/listener`;
@@ -86,8 +114,14 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
   };
 
   const handleExit = () => {
+    setShowExitConfirm(true);
+  };
+
+  const handleConfirmExit = () => {
     audioRef.current?.stop();
     clientRef.current?.disconnect();
+    setIsSessionActive(false);
+    setShowExitConfirm(false);
     onStop();
   };
 
@@ -96,15 +130,27 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
   };
 
   const statusLabel =
-    status === 'live' ? 'Подключено' : status === 'connecting' ? 'Подключение...' : 'Не подключено';
+    !isSessionActive
+      ? 'Сессия выключена'
+      : status === 'live'
+        ? 'Подключено'
+        : status === 'connecting'
+          ? 'Подключение...'
+          : 'Не подключено';
   const statusDotClass =
-    status === 'live' ? 'bg-green-500' : status === 'connecting' ? 'bg-yellow-400' : 'bg-[#FF3B30]';
+    !isSessionActive
+      ? 'bg-[#FF3B30]'
+      : status === 'live'
+        ? 'bg-green-500'
+        : status === 'connecting'
+          ? 'bg-yellow-400'
+          : 'bg-[#FF3B30]';
 
   return (
     <div className="min-h-screen bg-transparent flex flex-col items-center relative overflow-hidden">
       {/* Top Right Header Actions */}
       <div className="w-full px-4 pt-6 flex flex-col items-center gap-3 md:px-0 md:pt-0 md:flex-row md:gap-4 md:absolute md:top-6 md:right-10 md:w-auto">
-        <button 
+        <button
           onClick={handleCopyLink}
           className="flex items-center gap-2 px-4 py-2 bg-[#00A3FF]/10 border border-[#00A3FF]/30 rounded-full hover:bg-[#00A3FF]/20 transition-all group"
         >
@@ -121,7 +167,7 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
           )}
         </button>
 
-        <button 
+        <button
           onClick={handleExit}
           className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-all group"
         >
@@ -150,13 +196,30 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
 
           {/* Mic Toggle */}
           <div className="flex flex-col items-center gap-2">
-            <button 
+            <button
               onClick={() => setIsMicOn(!isMicOn)}
+              aria-label={isMicOn ? 'Выключить микрофон' : 'Включить микрофон'}
               className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${isMicOn ? 'bg-[#00A3FF] text-white' : 'bg-[#404040] text-gray-400'}`}
             >
               {isMicOn ? <Mic className="w-7 h-7" /> : <MicOff className="w-7 h-7" />}
             </button>
             <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{isMicOn ? 'вкл.' : 'выкл.'}</span>
+          </div>
+
+          {/* Session Toggle */}
+          <div className="flex flex-col items-center gap-2">
+            <button
+              onClick={() => setIsSessionActive((prev) => !prev)}
+              aria-label={isSessionActive ? 'Остановить сессию' : 'Запустить сессию'}
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
+                isSessionActive
+                  ? 'bg-[#FF3B30] text-white shadow-[0_0_25px_rgba(255,59,48,0.35)]'
+                  : 'bg-[#34C759] text-black shadow-[0_0_25px_rgba(52,199,89,0.35)]'
+              }`}
+            >
+              {isSessionActive ? <Square className="w-6 h-6" /> : <Play className="w-6 h-6 fill-current" />}
+            </button>
+            <span className="text-[10px] text-gray-500 font-bold uppercase tracking-widest">{isSessionActive ? 'стоп' : 'старт'}</span>
           </div>
 
           {/* Settings */}
@@ -268,6 +331,38 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
           </div>
         </div>
       </div>
+
+      {showExitConfirm && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="lecturer-exit-title"
+        >
+          <div className="w-full max-w-md rounded-3xl border border-white/10 bg-[#0A0A0A]/95 p-6 text-gray-200 shadow-[0_0_50px_rgba(0,0,0,0.6)]">
+            <h2 id="lecturer-exit-title" className="text-lg font-semibold text-white">
+              Выйти из сессии?
+            </h2>
+            <p className="mt-2 text-sm text-gray-400">
+              Перевод будет остановлен для всех слушателей.
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowExitConfirm(false)}
+                className="rounded-full border border-white/10 px-4 py-2 text-sm text-gray-300 hover:bg-white/10 transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleConfirmExit}
+                className="rounded-full bg-[#FF3B30] px-5 py-2 text-sm font-semibold text-white hover:bg-[#E6352C] transition-colors"
+              >
+                Выйти
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

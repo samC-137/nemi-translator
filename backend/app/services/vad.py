@@ -1,5 +1,12 @@
 from collections import deque
 from typing import Deque, List
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated as an API.*",
+    category=UserWarning,
+)
 
 import webrtcvad
 

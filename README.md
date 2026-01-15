@@ -105,3 +105,47 @@ TTS_SAMPLE_RATE=22050
 Notes:
 - Piper requires the `piper` CLI available in PATH.
 - `stream:tts` emits base64 PCM; you can add playback on the frontend later if needed.
+
+## Model preinstall (offline)
+Prefetch models so the first run does not download anything.
+
+### STT (faster-whisper)
+```bash
+mkdir -p models/faster-whisper-base
+python - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="Systran/faster-whisper-base",
+    local_dir="models/faster-whisper-base",
+    local_dir_use_symlinks=False,
+)
+PY
+```
+Set `STT_MODEL=./models/faster-whisper-base`.
+
+### MT (MarianMT)
+```bash
+mkdir -p models/hf
+export HF_HOME="$(pwd)/models/hf"
+export TRANSFORMERS_CACHE="$(pwd)/models/hf"
+python - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(repo_id="Helsinki-NLP/opus-mt-ru-en", cache_dir="models/hf")
+snapshot_download(repo_id="Helsinki-NLP/opus-mt-en-ru", cache_dir="models/hf")
+PY
+```
+
+### TTS (Piper)
+```bash
+mkdir -p models/piper
+PIPER_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/main"
+curl -L "$PIPER_BASE/en/en_US/lessac/low/en_US-lessac-low.onnx" -o models/piper/en_US-lessac-low.onnx
+curl -L "$PIPER_BASE/en/en_US/lessac/low/en_US-lessac-low.onnx.json" -o models/piper/en_US-lessac-low.onnx.json
+curl -L "$PIPER_BASE/ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx" -o models/piper/ru_RU-irina-medium.onnx
+curl -L "$PIPER_BASE/ru/ru_RU/irina/medium/ru_RU-irina-medium.onnx.json" -o models/piper/ru_RU-irina-medium.onnx.json
+curl -L "$PIPER_BASE/es/es_ES/mls_9972/low/es_ES-mls_9972-low.onnx" -o models/piper/es_ES-mls_9972-low.onnx
+curl -L "$PIPER_BASE/es/es_ES/mls_9972/low/es_ES-mls_9972-low.onnx.json" -o models/piper/es_ES-mls_9972-low.onnx.json
+```
+Set `TTS_MODEL_PATH` to one of the downloaded `.onnx` files.

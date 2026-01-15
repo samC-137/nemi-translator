@@ -1,0 +1,11 @@
+setuptools<81
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.23,<1.0
+PyJWT>=2.8,<3.0
+google-genai>=0.3.0
+faster-whisper>=1.0.0
+webrtcvad>=2.0.10
+transformers>=4.39.0
+sentencepiece>=0.2.0
+torch>=2.1.0
+piper-tts>=1.2.0

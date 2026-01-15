@@ -1,0 +1,8 @@
+
+{
+  "name": "NEMI AI - Synchronous Speech Translation",
+  "description": "A high-performance real-time speech-to-speech and speech-to-text translation platform for lectures and conferences using Gemini AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

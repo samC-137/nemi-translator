@@ -4,5 +4,34 @@ AGENTS.md
 backend_tasks.md
 FRONTEND_NEXT_STEPS.md
 .codex
-node_modules
-dist
+
+# dependencies
+node_modules/
+
+# build
+dist/
+dist-ssr/
+
+# Vite cache
+.vite/
+
+# env files (keep .env.example tracked)
+.env
+.env.* 
+!.env.example
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# coverage
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# model assets
+models/

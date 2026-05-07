@@ -32,6 +32,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [showOriginal, setShowOriginal] = useState(true);
   const [status, setStatus] = useState<RoomStatus>('connecting');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [downloaded, setDownloaded] = useState(false);
   const [supported, setSupported] = useState<SupportedLanguages>({
     limited: false,
@@ -284,6 +285,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
 
     setTranscription('');
     setTranslation('');
+    setErrorMessage(null);
     pendingTranscriptionRef.current = [];
     pendingTranslationRef.current = [];
     translationTimeoutsRef.current.forEach((id) => window.clearTimeout(id));
@@ -300,6 +302,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
           setTranscription,
           payload.packet.text
         );
+        setErrorMessage(null);
         setStatus('live');
       },
       onTranslation: (payload) =>
@@ -321,8 +324,22 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
           if (resolved) setSourceLang(resolved);
         }
         setStatus(payload.status);
+        if (payload.status === 'live' || payload.status === 'connecting') {
+          setErrorMessage(null);
+        }
       },
-      onError: () => setStatus('stopped')
+      onError: (payload) => {
+        setErrorMessage(payload.message);
+        setStatus('stopped');
+        setIsActive(false);
+      },
+      onDisconnect: () => {
+        if (isActive) {
+          setErrorMessage('Соединение с комнатой закрыто. Нажмите старт, чтобы подключиться снова.');
+          setStatus('stopped');
+          setIsActive(false);
+        }
+      }
     });
     clientRef.current.connect();
   }, [isActive, session.id, targetLang.code]);
@@ -355,9 +372,25 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   };
 
   const statusLabel =
-    status === 'live' ? 'Подключено' : status === 'connecting' ? 'Подключение...' : 'Не подключено';
+    status === 'live'
+      ? 'Подключено'
+      : status === 'reconnecting'
+        ? 'Переподключение...'
+        : status === 'disconnected'
+          ? 'Лектор отключился'
+          : status === 'connecting'
+            ? 'Подключение...'
+            : 'Не подключено';
   const statusDotClass =
-    status === 'live' ? 'bg-[#34C759]' : status === 'connecting' ? 'bg-yellow-400' : 'bg-[#FF3B30]';
+    status === 'live'
+      ? 'bg-[#34C759]'
+      : status === 'reconnecting'
+        ? 'bg-yellow-400'
+        : status === 'disconnected'
+          ? 'bg-orange-500'
+          : status === 'connecting'
+            ? 'bg-yellow-400'
+            : 'bg-[#FF3B30]';
 
   return (
     <div className="min-h-screen bg-transparent flex flex-col items-center pt-10 sm:pt-16 px-4 sm:px-8 relative">
@@ -486,6 +519,12 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
           <div className="h-4" />
         </div>
       </div>
+
+      {errorMessage && (
+        <div className="-mt-6 mb-10 w-full max-w-3xl rounded-2xl border border-rose-400/40 bg-rose-500/10 px-5 py-4 text-center text-sm text-rose-100">
+          {errorMessage}
+        </div>
+      )}
 
       {/* Main Content Side-by-Side Boxes */}
       <div

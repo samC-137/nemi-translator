@@ -40,7 +40,11 @@ class Settings:
     stt_language: str
     stt_device: str
     stt_compute_type: str
+    stt_segment_max_ms: int
+    stt_segment_min_ms: int
+    vad_padding_ms: int
     mt_provider: str
+    mt_model: str
     mt_models: str
     tts_provider: str
     tts_models: str
@@ -70,7 +74,12 @@ def load_settings() -> Settings:
         stt_language=_get_env("STT_LANGUAGE", "") or "",
         stt_device=_get_env("STT_DEVICE", "cpu") or "cpu",
         stt_compute_type=_get_env("STT_COMPUTE_TYPE", "int8") or "int8",
+        stt_segment_max_ms=_get_int("STT_SEGMENT_MAX_MS", 2000),
+        stt_segment_min_ms=_get_int("STT_SEGMENT_MIN_MS", 0),
+        vad_padding_ms=_get_int("VAD_PADDING_MS", 160),
         mt_provider=_get_env("MT_PROVIDER", "llm") or "llm",
+        mt_model=_get_env("MT_MODEL", "facebook/nllb-200-distilled-600M")
+        or "facebook/nllb-200-distilled-600M",
         mt_models=_get_env("MT_MODELS", "") or "",
         tts_provider=_get_env("TTS_PROVIDER", "none") or "none",
         tts_models=_get_env("TTS_MODELS", "") or "",

@@ -1,0 +1,14 @@
+services:
+  backend:
+    environment:
+      STT_PROVIDER: llm
+      MT_PROVIDER: llm
+      TTS_PROVIDER: fake
+      TTS_SAMPLE_RATE: 16000
+      LISTENER_DELAY_MS: 700
+      LLM_PROVIDER: fake
+      LLM_API_KEY: ""
+      LLM_FAKE_TRANSCRIPTS: "true"
+      LLM_FAKE_TRANSLATIONS: "true"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"

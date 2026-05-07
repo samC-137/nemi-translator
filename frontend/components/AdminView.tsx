@@ -2,7 +2,16 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Logo } from './Logo';
 import { RealtimeClient } from '../services/realtimeClient';
-import { ADMIN_ROOMS, AdminRoom, getAdminRoomById, getStatusLabel } from '../services/mockAdminRooms';
+import {
+  AdminRoom,
+  fetchAdminRoom,
+  fetchAdminRooms,
+  fetchAdminSystemStatus,
+  resetAdminRoomListeners,
+  restartAdminRoom,
+  stopAdminRoom,
+  AdminSystemStatus
+} from '../services/adminApi';
 import { RoomStatus } from '../types';
 import { ArrowLeft, Eye, Filter, Power, Search, Users } from 'lucide-react';
 import { clearAdminToken } from '../services/adminAuth';
@@ -10,6 +19,8 @@ import { clearAdminToken } from '../services/adminAuth';
 const statusStyles: Record<RoomStatus, { dot: string; pill: string }> = {
   live: { dot: 'bg-emerald-400', pill: 'border-emerald-400/40 text-emerald-200' },
   connecting: { dot: 'bg-yellow-300', pill: 'border-yellow-300/40 text-yellow-100' },
+  reconnecting: { dot: 'bg-yellow-300', pill: 'border-yellow-300/40 text-yellow-100' },
+  disconnected: { dot: 'bg-orange-400', pill: 'border-orange-400/40 text-orange-100' },
   stopped: { dot: 'bg-rose-400', pill: 'border-rose-400/40 text-rose-200' }
 };
 
@@ -22,6 +33,14 @@ const formatAgo = (timestamp: number) => {
   if (minutes < 60) return `${minutes} мин назад`;
   const hours = Math.round(minutes / 60);
   return `${hours} ч назад`;
+};
+
+const getStatusLabel = (status: RoomStatus) => {
+  if (status === 'live') return 'Live';
+  if (status === 'connecting') return 'Connecting';
+  if (status === 'reconnecting') return 'Reconnecting';
+  if (status === 'disconnected') return 'Disconnected';
+  return 'Stopped';
 };
 
 const AdminRoomRow: React.FC<{ room: AdminRoom; onOpen: (id: string) => void }> = ({
@@ -76,17 +95,35 @@ export const AdminView: React.FC = () => {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<RoomStatus | 'all'>('all');
+  const [rooms, setRooms] = useState<AdminRoom[]>([]);
+  const [stats, setStats] = useState({ total: 0, live: 0, listeners: 0 });
+  const [systemStatus, setSystemStatus] = useState<AdminSystemStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const stats = useMemo(() => {
-    const total = ADMIN_ROOMS.length;
-    const live = ADMIN_ROOMS.filter((room) => room.status === 'live').length;
-    const listeners = ADMIN_ROOMS.reduce((sum, room) => sum + room.listenersCount, 0);
-    return { total, live, listeners };
+  const loadRooms = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await fetchAdminRooms();
+      setRooms(data.rooms);
+      setStats({ total: data.total, live: data.live, listeners: data.listeners });
+      const status = await fetchAdminSystemStatus();
+      setSystemStatus(status);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить комнаты');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadRooms();
   }, []);
 
   const filteredRooms = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return ADMIN_ROOMS.filter((room) => {
+    return rooms.filter((room) => {
       const matchesQuery =
         !normalized ||
         room.id.toLowerCase().includes(normalized) ||
@@ -94,7 +131,7 @@ export const AdminView: React.FC = () => {
       const matchesStatus = statusFilter === 'all' || room.status === statusFilter;
       return matchesQuery && matchesStatus;
     });
-  }, [query, statusFilter]);
+  }, [query, rooms, statusFilter]);
 
   return (
     <div className="min-h-screen bg-transparent px-6 py-12 text-white md:px-10">
@@ -117,6 +154,12 @@ export const AdminView: React.FC = () => {
             >
               Logout
             </button>
+            <button
+              onClick={() => void loadRooms()}
+              className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs uppercase tracking-[0.2em] text-gray-400 transition hover:border-white/30 hover:text-white"
+            >
+              Refresh
+            </button>
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Всего комнат</p>
               <p className="text-lg font-semibold text-white">{stats.total}</p>
@@ -131,6 +174,41 @@ export const AdminView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {systemStatus && (
+          <div className="grid gap-3 rounded-3xl border border-white/10 bg-black/40 p-5 text-sm text-gray-300 md:grid-cols-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Profile</p>
+              <p className="mt-1 text-white">{systemStatus.profile}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">STT</p>
+              <p className="mt-1 text-white">{systemStatus.sttProvider}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">MT</p>
+              <p className="mt-1 text-white">{systemStatus.mtProvider}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">TTS</p>
+              <p className="mt-1 text-white">{systemStatus.ttsProvider}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Delay</p>
+              <p className="mt-1 text-white">{systemStatus.listenerDelayMs} ms</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">STT Window</p>
+              <p className="mt-1 text-white">
+                {systemStatus.sttSegmentMinMs}-{systemStatus.sttSegmentMaxMs} ms
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">VAD Pause</p>
+              <p className="mt-1 text-white">{systemStatus.vadPaddingMs} ms</p>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-black/40 p-5 md:flex-row md:items-center md:justify-between">
           <div className="relative w-full md:max-w-sm">
@@ -147,7 +225,7 @@ export const AdminView: React.FC = () => {
               <Filter className="h-4 w-4" />
               Статус
             </div>
-            {(['all', 'live', 'connecting', 'stopped'] as const).map((status) => (
+            {(['all', 'live', 'connecting', 'reconnecting', 'disconnected', 'stopped'] as const).map((status) => (
               <button
                 key={status}
                 onClick={() => setStatusFilter(status)}
@@ -164,12 +242,22 @@ export const AdminView: React.FC = () => {
         </div>
 
         <div className="flex flex-col gap-4">
-          {filteredRooms.length === 0 && (
+          {error && (
+            <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 px-6 py-4 text-sm text-rose-100">
+              {error}
+            </div>
+          )}
+          {isLoading && (
+            <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-sm text-gray-400">
+              Загружаем комнаты...
+            </div>
+          )}
+          {!isLoading && filteredRooms.length === 0 && (
             <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-sm text-gray-400">
               Комнат с такими параметрами не найдено.
             </div>
           )}
-          {filteredRooms.map((room) => (
+          {!isLoading && filteredRooms.map((room) => (
             <AdminRoomRow key={room.id} room={room} onOpen={(id) => navigate(`/admin/room/${id}`)} />
           ))}
         </div>
@@ -181,12 +269,36 @@ export const AdminView: React.FC = () => {
 export const AdminRoomView: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const room = id ? getAdminRoomById(id) : undefined;
+  const [room, setRoom] = useState<AdminRoom | null>(null);
+  const [isLoadingRoom, setIsLoadingRoom] = useState(true);
+  const [roomError, setRoomError] = useState<string | null>(null);
   const [transcription, setTranscription] = useState('');
   const [translation, setTranslation] = useState('');
   const [streamStatus, setStreamStatus] = useState<RoomStatus>('connecting');
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const clientRef = useRef<RealtimeClient | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    let active = true;
+    setIsLoadingRoom(true);
+    setRoomError(null);
+    fetchAdminRoom(id)
+      .then((nextRoom) => {
+        if (!active) return;
+        setRoom(nextRoom);
+        setStreamStatus(nextRoom.status);
+      })
+      .catch((err) => {
+        if (active) setRoomError(err instanceof Error ? err.message : 'Комната не найдена');
+      })
+      .finally(() => {
+        if (active) setIsLoadingRoom(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [id]);
 
   useEffect(() => {
     if (!room) return;
@@ -209,18 +321,43 @@ export const AdminRoomView: React.FC = () => {
     return () => {
       clientRef.current?.disconnect();
     };
-  }, [room]);
+  }, [room?.id]);
 
-  const handleAction = (label: string) => {
-    setActionMessage(`Действие "${label}" отправлено (мок)`);
-    window.setTimeout(() => setActionMessage(null), 1800);
+  const reloadRoom = async () => {
+    if (!id) return;
+    const nextRoom = await fetchAdminRoom(id);
+    setRoom(nextRoom);
+    setStreamStatus(nextRoom.status);
   };
 
-  if (!room) {
+  const handleAction = async (label: string, action: () => Promise<unknown>) => {
+    setActionMessage(null);
+    try {
+      await action();
+      await reloadRoom();
+      setActionMessage(`Действие "${label}" выполнено`);
+    } catch (err) {
+      setActionMessage(err instanceof Error ? err.message : `Не удалось выполнить "${label}"`);
+    }
+    window.setTimeout(() => setActionMessage(null), 2200);
+  };
+
+  if (isLoadingRoom) {
+    return (
+      <div className="min-h-screen bg-transparent px-6 py-12 text-white">
+        <div className="mx-auto max-w-4xl rounded-3xl border border-white/10 bg-white/5 p-10 text-center">
+          <p className="text-lg font-semibold">Загружаем комнату...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!room || roomError) {
     return (
       <div className="min-h-screen bg-transparent px-6 py-12 text-white">
         <div className="mx-auto max-w-4xl rounded-3xl border border-white/10 bg-white/5 p-10 text-center">
           <p className="text-lg font-semibold">Комната не найдена</p>
+          {roomError && <p className="mt-2 text-sm text-gray-400">{roomError}</p>}
           <button
             onClick={() => navigate('/admin')}
             className="mt-6 rounded-full border border-white/10 px-6 py-2 text-sm text-gray-300 transition hover:border-white/30"
@@ -247,19 +384,25 @@ export const AdminRoomView: React.FC = () => {
           </button>
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => handleAction('Остановить комнату')}
+              onClick={() =>
+                void handleAction('Остановить комнату', () => stopAdminRoom(room.id))
+              }
               className="rounded-full border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-rose-200 transition hover:border-rose-400/70"
             >
               Остановить комнату
             </button>
             <button
-              onClick={() => handleAction('Сброс слушателей')}
+              onClick={() =>
+                void handleAction('Сброс слушателей', () => resetAdminRoomListeners(room.id))
+              }
               className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-200 transition hover:border-white/30"
             >
               Сброс слушателей
             </button>
             <button
-              onClick={() => handleAction('Перезапустить поток')}
+              onClick={() =>
+                void handleAction('Перезапустить поток', () => restartAdminRoom(room.id))
+              }
               className="rounded-full border border-[#00A3FF]/30 bg-[#00A3FF]/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#7CC6FF] transition hover:border-[#00A3FF]/60"
             >
               Перезапустить поток

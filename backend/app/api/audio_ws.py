@@ -6,12 +6,19 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.api.ws import _broadcast_room_error, _broadcast_transcription, _broadcast_translation, _broadcast_tts
+from app.api.ws import (
+    _broadcast_room_error,
+    _broadcast_room_status,
+    _broadcast_transcription,
+    _broadcast_translation,
+    _broadcast_tts,
+)
 from app.services.audio_buffer import AudioBuffer
 from app.services.gemini_live import GeminiLiveSession
 from app.services.runtime import (
     latency_tracker,
     marian_translator,
+    nllb_translator,
     settings,
     store,
     stt_engine,
@@ -29,11 +36,27 @@ logger = logging.getLogger("nemi")
 @router.websocket("/ws/rooms/{room_id}/audio")
 async def audio_stream(room_id: str, websocket: WebSocket):
     await websocket.accept()
-    if not store.get_room(room_id):
+    room = store.get_room(room_id)
+    if not room or room.status == "stopped":
         await websocket.close(code=1008)
         return
+    store.update_room_status(room_id, "live")
+    store.update_stream_state(
+        room_id=room_id,
+        listeners_count=store.get_listener_count(room_id),
+        status="live",
+    )
+    await _broadcast_room_status(room_id, message="audio_connected")
     buffer = AudioBuffer()
-    vad_segmenter = VADSegmenter() if stt_engine else None
+    vad_segmenter = (
+        VADSegmenter(
+            padding_ms=settings.vad_padding_ms,
+            max_segment_ms=settings.stt_segment_max_ms,
+            min_segment_ms=settings.stt_segment_min_ms,
+        )
+        if stt_engine
+        else None
+    )
     gemini_session: Optional[GeminiLiveSession] = None
     translation_queue: asyncio.Queue[Optional[tuple[str, int]]] = asyncio.Queue()
     listener_delay_ms = max(0, settings.listener_delay_ms)
@@ -70,13 +93,20 @@ async def audio_stream(room_id: str, websocket: WebSocket):
                         source_lang,
                         language,
                     )
+                elif nllb_translator and settings.mt_provider == "nllb":
+                    translated = await asyncio.to_thread(
+                        nllb_translator.translate,
+                        text,
+                        source_lang,
+                        language,
+                    )
                 else:
                     translated = await translator.translate(room_id, text, language)
                 if not translated:
                     continue
                 audio: Optional[bytes] = None
                 sample_rate: Optional[int] = None
-                if settings.tts_provider == "piper" and (tts_engine or tts_engines):
+                if tts_engine or tts_engines:
                     engine = tts_engines.get(language) or tts_engine
                     if engine:
                         audio = await engine.synthesize(translated)
@@ -179,3 +209,12 @@ async def audio_stream(room_id: str, websocket: WebSocket):
                     await handle_transcription(text)
         await translation_queue.put(None)
         await translation_task
+        room = store.get_room(room_id)
+        if room and room.status == "live":
+            store.update_room_status(room_id, "connecting")
+            store.update_stream_state(
+                room_id=room_id,
+                listeners_count=store.get_listener_count(room_id),
+                status="connecting",
+            )
+            await _broadcast_room_status(room_id, message="audio_disconnected")

@@ -11,9 +11,27 @@ docker compose up --build
 - Frontend: http://localhost:4173
 - Backend: http://localhost:8000
 
+Light open-source profile:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.light.yml up --build
+```
+
+Demo fake profile without model downloads:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+```
+
+Diploma open-source profile:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.diploma.yml up --build
+```
+
 ## Env templates
 - Backend: `backend/.env.example`
+- Backend light profile: `backend/.env.light.example`
+- Backend diploma profile: `backend/.env.diploma.example`
 - Frontend: `frontend/.env.example`
+- Sprint ML profile notes: `DOCS/sprint/ml_profiles_2026-05-07.md`
 
 ## Local development
 ### Backend
@@ -46,8 +64,10 @@ npm run dev
 - `STT_DEVICE` (default: `cpu`)
 - `STT_COMPUTE_TYPE` (default: `int8`)
 - `MT_PROVIDER` (default: `llm`)
+- `MT_MODEL` (default: `facebook/nllb-200-distilled-600M`)
 - `MT_MODELS` (default: empty)
 - `TTS_PROVIDER` (default: `none`)
+- `TTS_MODELS` (default: empty)
 - `TTS_MODEL_PATH` (default: empty)
 - `TTS_SAMPLE_RATE` (default: `22050`)
 - `LLM_PROVIDER` (default: `gemini`)
@@ -62,9 +82,37 @@ npm run dev
 - `VITE_BACKEND_URL` (default: `http://localhost:8000`)
 
 ## Demo mode
-For local demos without real STT/translation, set:
+For local demos without real STT/translation/TTS models:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+```
+
+Or set:
+- `STT_PROVIDER=llm`
+- `MT_PROVIDER=llm`
+- `TTS_PROVIDER=fake`
 - `LLM_FAKE_TRANSCRIPTS=true`
 - `LLM_FAKE_TRANSLATIONS=true`
+
+## Quality buffer
+
+For CPU-only deployments, the app can intentionally delay listener output to improve STT/translation/TTS quality.
+
+Key backend env variables:
+
+```text
+STT_SEGMENT_MAX_MS=7000
+STT_SEGMENT_MIN_MS=2500
+VAD_PADDING_MS=650
+LISTENER_DELAY_MS=5000
+```
+
+Details are documented in:
+
+```text
+DOCS/sprint/quality_buffer_design_2026-05-07.md
+```
 
 ## Gemini Live setup
 1) Set `LLM_PROVIDER=gemini` and `LLM_API_KEY` in backend env.
@@ -77,6 +125,11 @@ Limitations:
 - Translation fan-out remains best-effort per listener language.
 
 ## Self-hosted setup (faster-whisper + MarianMT + Piper)
+Target free/open profiles:
+
+- Light: `faster-whisper small int8` + MarianMT en/ru/es + Piper low en/ru/es.
+- Diploma: `faster-whisper medium int8` + NLLB-200 distilled 600M en/ru/es + Piper medium en/ru/es.
+
 ### STT (faster-whisper)
 Example env:
 ```
@@ -92,6 +145,13 @@ Set translation pairs via `MT_MODELS`:
 ```
 MT_PROVIDER=marian
 MT_MODELS=en-US->ru-RU=Helsinki-NLP/opus-mt-en-ru,ru-RU->en-US=Helsinki-NLP/opus-mt-ru-en
+```
+
+### MT (NLLB)
+Use the diploma translation profile:
+```
+MT_PROVIDER=nllb
+MT_MODEL=facebook/nllb-200-distilled-600M
 ```
 
 ### TTS (Piper)
@@ -149,3 +209,17 @@ curl -L "$PIPER_BASE/es/es_ES/mls_9972/low/es_ES-mls_9972-low.onnx" -o models/pi
 curl -L "$PIPER_BASE/es/es_ES/mls_9972/low/es_ES-mls_9972-low.onnx.json" -o models/piper/es_ES-mls_9972-low.onnx.json
 ```
 Set `TTS_MODEL_PATH` to one of the downloaded `.onnx` files.
+
+## Smoke tests
+After Docker is running:
+```bash
+docker compose exec backend python app/scripts/smoke_rest.py http://127.0.0.1:8000
+docker compose exec backend python app/scripts/smoke_ws.py http://127.0.0.1:8000
+docker compose exec backend python app/scripts/smoke_audio_pipeline.py http://127.0.0.1:8000
+```
+
+Browser microphone smoke with Chrome fake media:
+```bash
+cd frontend
+npm run smoke:mic
+```

@@ -1,0 +1,24 @@
+services:
+  backend:
+    environment:
+      STT_PROVIDER: faster-whisper
+      STT_MODEL: /models/hf/models--Systran--faster-whisper-medium/snapshots/08e178d48790749d25932bbc082711ddcfdfbc4f
+      STT_LANGUAGE: ""
+      STT_DEVICE: cpu
+      STT_COMPUTE_TYPE: int8
+      STT_SEGMENT_MAX_MS: 7000
+      STT_SEGMENT_MIN_MS: 2500
+      VAD_PADDING_MS: 650
+      MT_PROVIDER: nllb
+      MT_MODEL: facebook/nllb-200-distilled-600M
+      MT_MODELS: ""
+      TTS_PROVIDER: piper
+      TTS_MODELS: en-US=/models/piper/en_US-lessac-medium.onnx,ru-RU=/models/piper/ru_RU-irina-medium.onnx,es-ES=/models/piper/es_ES-davefx-medium.onnx
+      TTS_MODEL_PATH: /models/piper/en_US-lessac-medium.onnx
+      TTS_SAMPLE_RATE: 0
+      LISTENER_DELAY_MS: 5000
+      LLM_PROVIDER: none
+      LLM_FAKE_TRANSCRIPTS: "false"
+      LLM_FAKE_TRANSLATIONS: "false"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"

@@ -17,6 +17,7 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
   const [isMicOn, setIsMicOn] = useState(false);
   const [transcription, setTranscription] = useState("");
   const [status, setStatus] = useState<RoomStatus>('stopped');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showMicSettings, setShowMicSettings] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
@@ -57,13 +58,31 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
       targetLanguage: session.targetLanguage,
       onTranscription: (payload) => {
         setTranscription(payload.packet.text);
+        setErrorMessage(null);
         setStatus('live');
       },
-      onStatus: (payload) => setStatus(payload.status),
-      onError: () => setStatus('stopped')
+      onStatus: (payload) => {
+        setStatus(payload.status);
+        if (payload.status === 'live' || payload.status === 'connecting') {
+          setErrorMessage(null);
+        }
+      },
+      onError: (payload) => {
+        setErrorMessage(payload.message);
+        setStatus('stopped');
+        setIsSessionActive(false);
+      },
+      onDisconnect: () => {
+        if (isSessionActiveRef.current) {
+          setErrorMessage('Соединение с комнатой закрыто. Запустите сессию еще раз.');
+          setStatus('stopped');
+          setIsSessionActive(false);
+        }
+      }
     });
     if (isSessionActiveRef.current) {
       setStatus('connecting');
+      setErrorMessage(null);
       setTranscription('');
       clientRef.current?.connect();
     }
@@ -73,7 +92,12 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
     audioRef.current?.stop();
     audioRef.current = new AudioSender({
       roomId: session.id,
-      processing: audioSettings
+      processing: audioSettings,
+      onReady: () => setErrorMessage(null),
+      onError: (message) => {
+        setErrorMessage(message);
+        setIsMicOn(false);
+      }
     });
     if (isSessionActiveRef.current && isMicOnRef.current) {
       audioRef.current.start();
@@ -89,6 +113,7 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
       return;
     }
     setStatus('connecting');
+    setErrorMessage(null);
     setTranscription('');
     clientRef.current?.connect();
   }, [isSessionActive]);
@@ -107,10 +132,16 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
 
   const handleCopyLink = () => {
     const url = `${window.location.origin}/room/${session.id}/listener`;
-    navigator.clipboard.writeText(url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    navigator.clipboard
+      .writeText(url)
+      .then(() => {
+        setCopied(true);
+        setErrorMessage(null);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
+        setErrorMessage('Браузер запретил доступ к буферу обмена. Скопируйте ссылку из адресной строки.');
+      });
   };
 
   const handleExit = () => {
@@ -134,6 +165,10 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
       ? 'Сессия выключена'
       : status === 'live'
         ? 'Подключено'
+        : status === 'reconnecting'
+          ? 'Переподключение...'
+          : status === 'disconnected'
+            ? 'Лектор отключен'
         : status === 'connecting'
           ? 'Подключение...'
           : 'Не подключено';
@@ -142,6 +177,10 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
       ? 'bg-[#FF3B30]'
       : status === 'live'
         ? 'bg-green-500'
+        : status === 'reconnecting'
+          ? 'bg-yellow-400'
+          : status === 'disconnected'
+            ? 'bg-orange-500'
         : status === 'connecting'
           ? 'bg-yellow-400'
           : 'bg-[#FF3B30]';
@@ -318,6 +357,12 @@ export const LecturerView: React.FC<LecturerViewProps> = ({ session, onStop, onU
             <div className="h-4" />
           </div>
         </div>
+
+        {errorMessage && (
+          <div className="mb-8 w-full max-w-3xl rounded-2xl border border-rose-400/40 bg-rose-500/10 px-5 py-4 text-center text-sm text-rose-100">
+            {errorMessage}
+          </div>
+        )}
 
         {/* Transcription Box */}
         <div className="w-full max-w-4xl px-4">

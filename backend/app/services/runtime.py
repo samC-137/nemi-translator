@@ -6,7 +6,9 @@ from app.services.store import InMemoryStore
 from app.services.stt_faster_whisper import FasterWhisperSTT
 from app.services.transcriber import LLMTranscriber, LatencyTracker
 from app.services.mt_marian import MarianTranslator
+from app.services.mt_nllb import NllbTranslator
 from app.services.translator import LLMTranslator
+from app.services.tts_fake import FakeTTS
 from app.services.tts_piper import PiperTTS
 
 settings = load_settings()
@@ -48,6 +50,11 @@ marian_translator = (
     if settings.mt_provider == "marian"
     else None
 )
+nllb_translator = (
+    NllbTranslator(settings.mt_model)
+    if settings.mt_provider == "nllb"
+    else None
+)
 tts_engine = (
     PiperTTS(
         model_path=settings.tts_model_path,
@@ -56,6 +63,8 @@ tts_engine = (
     if settings.tts_provider == "piper" and settings.tts_model_path
     else None
 )
+if settings.tts_provider == "fake":
+    tts_engine = FakeTTS(sample_rate=settings.tts_sample_rate)
 tts_engines = {}
 if settings.tts_provider == "piper" and settings.tts_models:
     for language, model_path in _parse_model_map(settings.tts_models).items():

@@ -91,12 +91,16 @@ class InMemoryStore:
             return list(self._participants.values())
         return [p for p in self._participants.values() if p.room_id == room_id]
 
+    def list_listeners(self, room_id: str) -> List[Participant]:
+        return [
+            p
+            for p in self._participants.values()
+            if p.room_id == room_id and p.role == "listener"
+        ]
+
     def list_listener_languages(self, room_id: str) -> List[str]:
-        participants = self.list_participants(room_id)
         languages = []
-        for participant in participants:
-            if participant.role != "listener":
-                continue
+        for participant in self.list_listeners(room_id):
             if participant.target_language:
                 languages.append(participant.target_language)
         return languages
@@ -137,8 +141,23 @@ class InMemoryStore:
     def get_stream_state(self, room_id: str) -> Optional[StreamState]:
         return self._stream_states.get(room_id)
 
-    def get_listener_count(self, room_id: str) -> int:
+    def get_participant_count(self, room_id: str) -> int:
         return len([p for p in self._participants.values() if p.room_id == room_id])
+
+    def get_role_count(self, room_id: str, role: str) -> int:
+        return len(
+            [
+                p
+                for p in self._participants.values()
+                if p.room_id == room_id and p.role == role
+            ]
+        )
+
+    def has_role(self, room_id: str, role: str) -> bool:
+        return self.get_role_count(room_id, role) > 0
+
+    def get_listener_count(self, room_id: str) -> int:
+        return len(self.list_listeners(room_id))
 
     def log_admin_action(self, room_id: str, action: str) -> None:
         self._admin_actions.append(

@@ -1,0 +1,23 @@
+services:
+  backend:
+    environment:
+      STT_PROVIDER: faster-whisper
+      STT_MODEL: /models/hf/models--Systran--faster-whisper-small/snapshots/536b0662742c02347bc0e980a01041f333bce120
+      STT_LANGUAGE: ""
+      STT_DEVICE: cpu
+      STT_COMPUTE_TYPE: int8
+      STT_SEGMENT_MAX_MS: 6000
+      STT_SEGMENT_MIN_MS: 2000
+      VAD_PADDING_MS: 550
+      MT_PROVIDER: marian
+      MT_MODELS: en-US->ru-RU=Helsinki-NLP/opus-mt-en-ru,ru-RU->en-US=Helsinki-NLP/opus-mt-ru-en,en-US->es-ES=Helsinki-NLP/opus-mt-en-es,es-ES->en-US=Helsinki-NLP/opus-mt-es-en,ru-RU->es-ES=Helsinki-NLP/opus-mt-ru-es,es-ES->ru-RU=Helsinki-NLP/opus-mt-es-ru
+      TTS_PROVIDER: piper
+      TTS_MODELS: en-US=/models/piper/en_US-lessac-low.onnx,ru-RU=/models/piper/ru_RU-irina-medium.onnx,es-ES=/models/piper/es_ES-mls_9972-low.onnx
+      TTS_MODEL_PATH: /models/piper/en_US-lessac-low.onnx
+      TTS_SAMPLE_RATE: 0
+      LISTENER_DELAY_MS: 4000
+      LLM_PROVIDER: none
+      LLM_FAKE_TRANSCRIPTS: "false"
+      LLM_FAKE_TRANSLATIONS: "false"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"

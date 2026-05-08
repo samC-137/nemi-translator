@@ -17,6 +17,10 @@ services:
       TTS_MODEL_PATH: /models/piper/en_US-lessac-medium.onnx
       TTS_SAMPLE_RATE: 0
       LISTENER_DELAY_MS: 5000
+      TRANSLATION_CONTEXT_SEGMENTS: 5
+      PHRASE_MIN_CHARS: 28
+      PHRASE_MAX_CHARS: 260
+      PHRASE_TIMEOUT_MS: 1800
       LLM_PROVIDER: none
       LLM_FAKE_TRANSCRIPTS: "false"
       LLM_FAKE_TRANSLATIONS: "false"

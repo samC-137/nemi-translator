@@ -188,6 +188,9 @@ export const AdminView: React.FC = () => {
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-gray-500">MT</p>
               <p className="mt-1 text-white">{systemStatus.mtProvider}</p>
+              {systemStatus.mtProvider === 'ollama' && (
+                <p className="mt-1 truncate text-xs text-gray-500">{systemStatus.ollamaModel}</p>
+              )}
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-gray-500">TTS</p>
@@ -206,6 +209,20 @@ export const AdminView: React.FC = () => {
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-gray-500">VAD Pause</p>
               <p className="mt-1 text-white">{systemStatus.vadPaddingMs} ms</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Context</p>
+              <p className="mt-1 text-white">{systemStatus.translationContextSegments} segments</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Phrase</p>
+              <p className="mt-1 text-white">
+                {systemStatus.phraseMinChars}-{systemStatus.phraseMaxChars} chars
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-gray-500">Phrase Wait</p>
+              <p className="mt-1 text-white">{systemStatus.phraseTimeoutMs} ms</p>
             </div>
           </div>
         )}

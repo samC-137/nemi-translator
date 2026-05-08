@@ -7,6 +7,8 @@ from app.services.stt_faster_whisper import FasterWhisperSTT
 from app.services.transcriber import LLMTranscriber, LatencyTracker
 from app.services.mt_marian import MarianTranslator
 from app.services.mt_nllb import NllbTranslator
+from app.services.mt_ollama import OllamaTranslator
+from app.services.translation_quality import TranslationGlossary
 from app.services.translator import LLMTranslator
 from app.services.tts_fake import FakeTTS
 from app.services.tts_piper import PiperTTS
@@ -34,6 +36,7 @@ def _parse_model_map(raw: str) -> dict:
 
 store = InMemoryStore()
 connections = ConnectionManager()
+translation_glossary = TranslationGlossary.from_path(settings.translation_glossary_path)
 transcriber = LLMTranscriber(
     provider=settings.llm_provider,
     api_key=settings.llm_api_key,
@@ -53,6 +56,16 @@ marian_translator = (
 nllb_translator = (
     NllbTranslator(settings.mt_model)
     if settings.mt_provider == "nllb"
+    else None
+)
+ollama_translator = (
+    OllamaTranslator(
+        base_url=settings.ollama_base_url,
+        model=settings.ollama_model,
+        timeout_seconds=settings.ollama_timeout_seconds,
+        glossary=translation_glossary,
+    )
+    if settings.mt_provider == "ollama"
     else None
 )
 tts_engine = (

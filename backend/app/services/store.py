@@ -12,8 +12,10 @@ class InMemoryStore:
         self._stream_states: Dict[str, StreamState] = {}
         self._admin_actions: List[dict] = []
         self._transcription_history: Dict[str, str] = {}
+        self._transcription_segments: Dict[str, List[str]] = {}
         self._translation_history: Dict[str, Dict[str, str]] = {}
         self._max_history_chars = 20000
+        self._max_context_segments = 40
 
     def create_room(
         self,
@@ -176,6 +178,12 @@ class InMemoryStore:
             return
         current = self._transcription_history.get(room_id, "")
         self._transcription_history[room_id] = self._append_text(current, text)
+        segments = self._transcription_segments.setdefault(room_id, [])
+        cleaned = text.strip()
+        if cleaned:
+            segments.append(cleaned)
+        if len(segments) > self._max_context_segments:
+            del segments[: len(segments) - self._max_context_segments]
 
     def append_translation(self, room_id: str, target_language: str, text: str) -> None:
         if not text or not target_language:
@@ -186,6 +194,11 @@ class InMemoryStore:
 
     def get_transcription_history(self, room_id: str) -> str:
         return self._transcription_history.get(room_id, "")
+
+    def get_recent_transcription_segments(self, room_id: str, limit: int) -> List[str]:
+        if limit <= 0:
+            return []
+        return self._transcription_segments.get(room_id, [])[-limit:]
 
     def get_translation_history(self, room_id: str, target_language: str) -> str:
         if not target_language:

@@ -46,6 +46,14 @@ class Settings:
     mt_provider: str
     mt_model: str
     mt_models: str
+    ollama_base_url: str
+    ollama_model: str
+    ollama_timeout_seconds: int
+    translation_context_segments: int
+    translation_glossary_path: str
+    phrase_min_chars: int
+    phrase_max_chars: int
+    phrase_timeout_ms: int
     tts_provider: str
     tts_models: str
     tts_model_path: str
@@ -81,6 +89,20 @@ def load_settings() -> Settings:
         mt_model=_get_env("MT_MODEL", "facebook/nllb-200-distilled-600M")
         or "facebook/nllb-200-distilled-600M",
         mt_models=_get_env("MT_MODELS", "") or "",
+        ollama_base_url=_get_env("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
+        or "http://host.docker.internal:11434",
+        ollama_model=_get_env("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+        or "qwen2.5:7b-instruct",
+        ollama_timeout_seconds=_get_int("OLLAMA_TIMEOUT_SECONDS", 45),
+        translation_context_segments=_get_int("TRANSLATION_CONTEXT_SEGMENTS", 4),
+        translation_glossary_path=_get_env(
+            "TRANSLATION_GLOSSARY_PATH",
+            "/app/app/config/glossary.json",
+        )
+        or "/app/app/config/glossary.json",
+        phrase_min_chars=_get_int("PHRASE_MIN_CHARS", 24),
+        phrase_max_chars=_get_int("PHRASE_MAX_CHARS", 220),
+        phrase_timeout_ms=_get_int("PHRASE_TIMEOUT_MS", 1800),
         tts_provider=_get_env("TTS_PROVIDER", "none") or "none",
         tts_models=_get_env("TTS_MODELS", "") or "",
         tts_model_path=_get_env("TTS_MODEL_PATH", "") or "",

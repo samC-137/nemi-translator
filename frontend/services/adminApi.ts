@@ -40,6 +40,8 @@ export type AdminSystemStatus = {
   sttModel: string;
   mtProvider: string;
   mtModel: string;
+  ollamaBaseUrl: string;
+  ollamaModel: string;
   ttsProvider: string;
   fakeTranscripts: boolean;
   fakeTranslations: boolean;
@@ -47,6 +49,10 @@ export type AdminSystemStatus = {
   sttSegmentMaxMs: number;
   sttSegmentMinMs: number;
   vadPaddingMs: number;
+  translationContextSegments: number;
+  phraseMinChars: number;
+  phraseMaxChars: number;
+  phraseTimeoutMs: number;
 };
 
 const resolveBaseUrl = () => {

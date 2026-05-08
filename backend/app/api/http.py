@@ -92,6 +92,8 @@ class SystemStatusResponse(BaseModel):
     sttModel: str
     mtProvider: str
     mtModel: str
+    ollamaBaseUrl: str
+    ollamaModel: str
     ttsProvider: str
     fakeTranscripts: bool
     fakeTranslations: bool
@@ -99,6 +101,10 @@ class SystemStatusResponse(BaseModel):
     sttSegmentMaxMs: int
     sttSegmentMinMs: int
     vadPaddingMs: int
+    translationContextSegments: int
+    phraseMinChars: int
+    phraseMaxChars: int
+    phraseTimeoutMs: int
 
 
 class SupportedLanguagesResponse(BaseModel):
@@ -365,6 +371,8 @@ async def system_status(_admin: dict = Depends(require_admin)) -> SystemStatusRe
         profile = "light"
     elif "faster-whisper-medium" in settings.stt_model and settings.mt_provider == "nllb":
         profile = "diploma"
+    elif settings.mt_provider == "ollama":
+        profile = "local-llm"
 
     return SystemStatusResponse(
         stt="ok",
@@ -374,7 +382,9 @@ async def system_status(_admin: dict = Depends(require_admin)) -> SystemStatusRe
         sttProvider=settings.stt_provider,
         sttModel=settings.stt_model,
         mtProvider=settings.mt_provider,
-        mtModel=settings.mt_model,
+        mtModel=settings.ollama_model if settings.mt_provider == "ollama" else settings.mt_model,
+        ollamaBaseUrl=settings.ollama_base_url,
+        ollamaModel=settings.ollama_model,
         ttsProvider=settings.tts_provider,
         fakeTranscripts=settings.llm_fake_transcripts,
         fakeTranslations=settings.llm_fake_translations,
@@ -382,12 +392,16 @@ async def system_status(_admin: dict = Depends(require_admin)) -> SystemStatusRe
         sttSegmentMaxMs=settings.stt_segment_max_ms,
         sttSegmentMinMs=settings.stt_segment_min_ms,
         vadPaddingMs=settings.vad_padding_ms,
+        translationContextSegments=settings.translation_context_segments,
+        phraseMinChars=settings.phrase_min_chars,
+        phraseMaxChars=settings.phrase_max_chars,
+        phraseTimeoutMs=settings.phrase_timeout_ms,
     )
 
 
 @router.get("/supported-languages", response_model=SupportedLanguagesResponse)
 async def supported_languages() -> SupportedLanguagesResponse:
-    if settings.mt_provider == "nllb":
+    if settings.mt_provider in {"nllb", "ollama"}:
         languages = NllbTranslator.supported_app_languages()
         return SupportedLanguagesResponse(
             limited=True,

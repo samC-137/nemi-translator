@@ -11,7 +11,7 @@ FRONTEND_NEXT_STEPS.md
 .playwright-mcp
 # dependencies
 node_modules/
-
+DESIGN.md
 # build
 dist/
 dist-ssr/

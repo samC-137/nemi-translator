@@ -1,15 +1,20 @@
 from typing import Any, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+import jwt
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from app.core.config import load_settings
-from app.services.auth import create_token
+from app.api.ws import _broadcast_listener_count, _broadcast_room_error, _broadcast_room_status
+from app.services.auth import create_token, decode_token
+from app.services.mt_nllb import NllbTranslator
 from app.services.runtime import store
 
 router = APIRouter()
 settings = load_settings()
+bearer_scheme = HTTPBearer(auto_error=False)
 
 
 class CreateRoomRequest(BaseModel):
@@ -21,6 +26,9 @@ class CreateRoomResponse(BaseModel):
     roomId: str
     token: str
     role: str
+    status: str
+    sourceLanguage: str
+    targetLanguage: Optional[str]
 
 
 class JoinRoomRequest(BaseModel):
@@ -31,6 +39,9 @@ class JoinRoomResponse(BaseModel):
     roomId: str
     token: str
     role: str
+    status: str
+    sourceLanguage: str
+    targetLanguage: Optional[str]
 
 
 class RoomSummary(BaseModel):
@@ -39,6 +50,9 @@ class RoomSummary(BaseModel):
     sourceLanguage: str
     targetLanguage: Optional[str]
     listenersCount: int
+    latency: int
+    createdAt: str
+    updatedAt: str
 
 
 class RoomListResponse(BaseModel):
@@ -54,6 +68,7 @@ class RoomDetailResponse(BaseModel):
     sourceLanguage: str
     targetLanguage: Optional[str]
     listenersCount: int
+    latency: int
     createdAt: str
     updatedAt: str
 
@@ -72,6 +87,24 @@ class SystemStatusResponse(BaseModel):
     stt: str
     translate: str
     tts: str
+    profile: str
+    sttProvider: str
+    sttModel: str
+    mtProvider: str
+    mtModel: str
+    ollamaBaseUrl: str
+    ollamaModel: str
+    ttsProvider: str
+    fakeTranscripts: bool
+    fakeTranslations: bool
+    listenerDelayMs: int
+    sttSegmentMaxMs: int
+    sttSegmentMinMs: int
+    vadPaddingMs: int
+    translationContextSegments: int
+    phraseMinChars: int
+    phraseMaxChars: int
+    phraseTimeoutMs: int
 
 
 class SupportedLanguagesResponse(BaseModel):
@@ -114,6 +147,24 @@ def _generate_room_id() -> str:
     return f"NEMI-{str(uuid4().int)[-4:]}"
 
 
+def require_admin(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> dict:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="missing_admin_token")
+    try:
+        payload = decode_token(
+            credentials.credentials,
+            secret=settings.jwt_secret,
+            algorithm=settings.jwt_algorithm,
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="invalid_admin_token")
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="admin_required")
+    return payload
+
+
 @router.post("/rooms", response_model=CreateRoomResponse)
 async def create_room(payload: CreateRoomRequest) -> CreateRoomResponse:
     room_id = _generate_room_id()
@@ -136,7 +187,14 @@ async def create_room(payload: CreateRoomRequest) -> CreateRoomResponse:
         extra_claims={"roomId": room_id},
     )
 
-    return CreateRoomResponse(roomId=room_id, token=token, role="lecturer")
+    return CreateRoomResponse(
+        roomId=room_id,
+        token=token,
+        role="lecturer",
+        status="connecting",
+        sourceLanguage=source_language,
+        targetLanguage=target_language,
+    )
 
 
 @router.post("/rooms/{room_id}/join", response_model=JoinRoomResponse)
@@ -156,17 +214,25 @@ async def join_room(room_id: str, payload: JoinRoomRequest) -> JoinRoomResponse:
         extra_claims={"roomId": room_id, "targetLanguage": target_language or ""},
     )
 
-    return JoinRoomResponse(roomId=room_id, token=token, role="listener")
+    return JoinRoomResponse(
+        roomId=room_id,
+        token=token,
+        role="listener",
+        status=room.status,
+        sourceLanguage=room.source_language,
+        targetLanguage=target_language or room.target_language,
+    )
 
 
 @router.get("/admin/rooms", response_model=RoomListResponse)
-async def list_rooms() -> RoomListResponse:
+async def list_rooms(_admin: dict = Depends(require_admin)) -> RoomListResponse:
     rooms = store.list_rooms()
     summaries: list[RoomSummary] = []
     total_listeners = 0
     live_count = 0
     for room in rooms:
         listeners = store.get_listener_count(room.id)
+        stream_state = store.get_stream_state(room.id)
         total_listeners += listeners
         if room.status == "live":
             live_count += 1
@@ -177,6 +243,9 @@ async def list_rooms() -> RoomListResponse:
                 sourceLanguage=room.source_language,
                 targetLanguage=room.target_language,
                 listenersCount=listeners,
+                latency=stream_state.latency_ms if stream_state else 0,
+                createdAt=room.created_at.isoformat(),
+                updatedAt=room.updated_at.isoformat(),
             )
         )
 
@@ -189,53 +258,88 @@ async def list_rooms() -> RoomListResponse:
 
 
 @router.get("/admin/rooms/{room_id}", response_model=RoomDetailResponse)
-async def get_room(room_id: str) -> RoomDetailResponse:
+async def get_room(
+    room_id: str,
+    _admin: dict = Depends(require_admin),
+) -> RoomDetailResponse:
     room = store.get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail="room_not_found")
     listeners = store.get_listener_count(room.id)
+    stream_state = store.get_stream_state(room.id)
     return RoomDetailResponse(
         roomId=room.id,
         status=room.status,
         sourceLanguage=room.source_language,
         targetLanguage=room.target_language,
         listenersCount=listeners,
+        latency=stream_state.latency_ms if stream_state else 0,
         createdAt=room.created_at.isoformat(),
         updatedAt=room.updated_at.isoformat(),
     )
 
 
 @router.post("/admin/rooms/{room_id}/stop")
-async def stop_room(room_id: str):
+async def stop_room(room_id: str, _admin: dict = Depends(require_admin)):
     room = store.get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail="room_not_found")
     updated = store.update_room_status(room_id, "stopped")
+    store.update_stream_state(
+        room_id=room_id,
+        listeners_count=store.get_listener_count(room_id),
+        status="stopped",
+    )
     store.log_admin_action(room_id, "stop")
+    await _broadcast_room_status(room_id, message="admin_stop")
+    await _broadcast_room_error(
+        room_id=room_id,
+        code="room_stopped",
+        message="Комната остановлена администратором.",
+        fatal=True,
+    )
     return {"roomId": room_id, "status": updated.status if updated else "stopped"}
 
 
 @router.post("/admin/rooms/{room_id}/reset-listeners")
-async def reset_listeners(room_id: str):
+async def reset_listeners(room_id: str, _admin: dict = Depends(require_admin)):
     room = store.get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail="room_not_found")
-    participants = store.list_participants(room_id)
+    participants = store.list_listeners(room_id)
     removed = 0
     for participant in participants:
         store.remove_participant(participant.id)
         removed += 1
+    store.update_stream_state(
+        room_id=room_id,
+        listeners_count=store.get_listener_count(room_id),
+        status=room.status,
+    )
     store.log_admin_action(room_id, "reset_listeners")
+    await _broadcast_listener_count(room_id)
+    await _broadcast_room_error(
+        room_id=room_id,
+        code="listeners_reset",
+        message="Слушатели сброшены администратором.",
+        fatal=False,
+    )
     return {"roomId": room_id, "removed": removed}
 
 
 @router.post("/admin/rooms/{room_id}/restart")
-async def restart_room(room_id: str):
+async def restart_room(room_id: str, _admin: dict = Depends(require_admin)):
     room = store.get_room(room_id)
     if not room:
         raise HTTPException(status_code=404, detail="room_not_found")
     updated = store.update_room_status(room_id, "connecting")
+    store.update_stream_state(
+        room_id=room_id,
+        listeners_count=store.get_listener_count(room_id),
+        status="connecting",
+    )
     store.log_admin_action(room_id, "restart")
+    await _broadcast_room_status(room_id, message="admin_restart")
     return {"roomId": room_id, "status": updated.status if updated else "connecting"}
 
 
@@ -255,12 +359,59 @@ async def admin_login(payload: AdminLoginRequest) -> AdminLoginResponse:
 
 
 @router.get("/admin/system/status", response_model=SystemStatusResponse)
-async def system_status() -> SystemStatusResponse:
-    return SystemStatusResponse(stt="ok", translate="ok", tts="ok")
+async def system_status(_admin: dict = Depends(require_admin)) -> SystemStatusResponse:
+    profile = "custom"
+    if (
+        settings.stt_provider == "llm"
+        and settings.mt_provider == "llm"
+        and settings.tts_provider == "fake"
+    ):
+        profile = "demo"
+    elif "faster-whisper-small" in settings.stt_model and settings.mt_provider == "marian":
+        profile = "light"
+    elif "faster-whisper-medium" in settings.stt_model and settings.mt_provider == "nllb":
+        profile = "diploma"
+    elif settings.mt_provider == "ollama":
+        profile = "local-llm"
+
+    return SystemStatusResponse(
+        stt="ok",
+        translate="ok",
+        tts="ok",
+        profile=profile,
+        sttProvider=settings.stt_provider,
+        sttModel=settings.stt_model,
+        mtProvider=settings.mt_provider,
+        mtModel=settings.ollama_model if settings.mt_provider == "ollama" else settings.mt_model,
+        ollamaBaseUrl=settings.ollama_base_url,
+        ollamaModel=settings.ollama_model,
+        ttsProvider=settings.tts_provider,
+        fakeTranscripts=settings.llm_fake_transcripts,
+        fakeTranslations=settings.llm_fake_translations,
+        listenerDelayMs=settings.listener_delay_ms,
+        sttSegmentMaxMs=settings.stt_segment_max_ms,
+        sttSegmentMinMs=settings.stt_segment_min_ms,
+        vadPaddingMs=settings.vad_padding_ms,
+        translationContextSegments=settings.translation_context_segments,
+        phraseMinChars=settings.phrase_min_chars,
+        phraseMaxChars=settings.phrase_max_chars,
+        phraseTimeoutMs=settings.phrase_timeout_ms,
+    )
 
 
 @router.get("/supported-languages", response_model=SupportedLanguagesResponse)
 async def supported_languages() -> SupportedLanguagesResponse:
+    if settings.mt_provider in {"nllb", "ollama"}:
+        languages = NllbTranslator.supported_app_languages()
+        return SupportedLanguagesResponse(
+            limited=True,
+            sources=languages,
+            targetsBySource={
+                source: [target for target in languages if target != source]
+                for source in languages
+            },
+        )
+
     if settings.mt_provider != "marian" or not settings.mt_models:
         return SupportedLanguagesResponse(limited=False, sources=[], targetsBySource={})
 

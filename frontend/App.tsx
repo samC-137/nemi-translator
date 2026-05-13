@@ -8,25 +8,13 @@ import { AdminRoomView, AdminView } from './components/AdminView';
 import { AdminLogin } from './components/AdminLogin';
 import { RoomSession, Language, LANGUAGES } from './types';
 import { getAdminToken } from './services/adminAuth';
-
-const createRoomId = () => `NEMI-${Math.floor(1000 + Math.random() * 9000)}`;
-
-const createMockSessionFromRoomId = (roomId: string): RoomSession => {
-  const isMockRussian = roomId.length % 2 === 0;
-  const sourceLanguage = isMockRussian ? LANGUAGES[1] : LANGUAGES[0];
-  const targetLanguage = isMockRussian ? LANGUAGES[0] : LANGUAGES[1];
-
-  return {
-    id: roomId,
-    sourceLanguage,
-    targetLanguage,
-    status: 'live'
-  };
-};
+import { createRoom, joinRoom } from './services/roomsApi';
 
 const LobbyRoute: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -39,31 +27,62 @@ const LobbyRoute: React.FC = () => {
     }
   }, [location.search, navigate]);
 
-  const handleCreateRoom = (lang: Language) => {
-    const roomId = createRoomId();
-    navigate(`/room/${roomId}/lecturer`, {
-      state: { sourceLanguage: lang }
-    });
+  const handleCreateRoom = async (lang: Language) => {
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const session = await createRoom(lang);
+      navigate(`/room/${session.id}/lecturer`, {
+        state: { session }
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать комнату');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleJoinRoom = (roomId: string) => {
+  const handleJoinRoom = async (roomId: string, targetLang: Language) => {
     const cleaned = roomId.trim();
     if (!cleaned) return;
-    navigate(`/room/${cleaned}/listener`);
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const session = await joinRoom(cleaned, targetLang);
+      navigate(`/room/${session.id}/listener`, {
+        state: { session }
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось подключиться к комнате');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  return <Lobby onCreateRoom={handleCreateRoom} onJoinRoom={handleJoinRoom} />;
+  return (
+    <Lobby
+      error={error}
+      isSubmitting={isSubmitting}
+      onCreateRoom={handleCreateRoom}
+      onJoinRoom={handleJoinRoom}
+    />
+  );
 };
 
 const LecturerRoute: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const sessionFromState = (location.state as { session?: RoomSession } | null)?.session;
   const sourceFromState = (location.state as { sourceLanguage?: Language } | null)?.sourceLanguage;
   const [session, setSession] = useState<RoomSession | null>(null);
 
   useEffect(() => {
     if (!id) return;
+    if (sessionFromState) {
+      setSession(sessionFromState);
+      return;
+    }
     const sourceLanguage = sourceFromState ?? LANGUAGES[0];
     setSession({
       id,
@@ -71,7 +90,7 @@ const LecturerRoute: React.FC = () => {
       targetLanguage: LANGUAGES[0],
       status: 'live'
     });
-  }, [id, sourceFromState]);
+  }, [id, sessionFromState, sourceFromState]);
 
   if (!id) return <Navigate to="/" replace />;
   if (!session) return null;
@@ -93,17 +112,46 @@ const ListenerRoute: React.FC = () => {
   const location = useLocation();
   const sessionFromState = (location.state as { session?: RoomSession } | null)?.session;
   const [session, setSession] = useState<RoomSession | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
+    let active = true;
+    setError(null);
     if (sessionFromState) {
       setSession(sessionFromState);
       return;
     }
-    setSession(createMockSessionFromRoomId(id));
+    setSession(null);
+    joinRoom(id, LANGUAGES[1] ?? LANGUAGES[0])
+      .then((nextSession) => {
+        if (active) setSession(nextSession);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : 'Не удалось подключиться');
+      });
+    return () => {
+      active = false;
+    };
   }, [id, sessionFromState]);
 
   if (!id) return <Navigate to="/" replace />;
+  if (error) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6 text-white">
+        <div className="w-full max-w-md rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+          <h1 className="text-2xl font-semibold">Комната недоступна</h1>
+          <p className="mt-3 text-sm text-gray-400">{error}</p>
+          <button
+            onClick={() => navigate('/')}
+            className="mt-6 rounded-xl bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-500"
+          >
+            Вернуться на главную
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (!session) return null;
 
   return <ListenerView session={session} onExit={() => navigate('/')} />;

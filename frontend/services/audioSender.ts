@@ -10,6 +10,9 @@ export type AudioSenderOptions = {
   roomId: string;
   outputSampleRate?: number;
   processing?: AudioProcessingOptions;
+  onReady?: () => void;
+  onError?: (message: string) => void;
+  onClose?: () => void;
 };
 
 export type AudioProcessingOptions = {
@@ -101,6 +104,10 @@ export class AudioSender {
       await new Promise<void>((resolve, reject) => {
         ws.onopen = () => resolve();
         ws.onerror = () => reject(new Error('audio_ws_error'));
+        ws.onclose = () => {
+          this.ws = null;
+          this.options.onClose?.();
+        };
       });
 
       const processing = this.normalizeProcessing(this.options.processing);
@@ -156,8 +163,9 @@ export class AudioSender {
 
       pipeline.connect(this.processor);
       this.processor.connect(this.audioContext.destination);
+      this.options.onReady?.();
     } catch (error) {
-      console.error(error);
+      this.options.onError?.(toAudioErrorMessage(error));
       this.cleanup();
     } finally {
       this.isStarting = false;
@@ -217,3 +225,18 @@ const calculateRms = (input: Float32Array) => {
 };
 
 const zeroBuffer = (length: number) => new Float32Array(length);
+
+const toAudioErrorMessage = (error: unknown) => {
+  if (error instanceof DOMException) {
+    if (error.name === 'NotAllowedError') {
+      return 'Доступ к микрофону запрещен. Разрешите микрофон в браузере и попробуйте снова.';
+    }
+    if (error.name === 'NotFoundError') {
+      return 'Микрофон не найден. Подключите устройство ввода и попробуйте снова.';
+    }
+  }
+  if (error instanceof Error && error.message === 'audio_ws_error') {
+    return 'Не удалось открыть audio WebSocket. Проверьте, что backend запущен.';
+  }
+  return 'Не удалось запустить передачу аудио.';
+};

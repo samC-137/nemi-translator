@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Logo } from './Logo';
 import { Language, LANGUAGES, RoomSession, RoomStatus } from '../types';
 import { Play, Settings, ChevronDown } from 'lucide-react';
@@ -22,13 +22,29 @@ type PendingTranslation = {
   timeoutId: number;
 };
 
+type ListenerAudioStatus =
+  | 'disabled'
+  | 'needs-unlock'
+  | 'ready'
+  | 'queued'
+  | 'playing'
+  | 'suspended'
+  | 'error';
+
 export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) => {
   const textDelayMs = getListenerDelayMs();
   const [transcription, setTranscription] = useState("");
   const [translation, setTranslation] = useState("");
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [isActive, setIsActive] = useState(true);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [showOriginal, setShowOriginal] = useState(true);
   const [status, setStatus] = useState<RoomStatus>('connecting');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [audioStatus, setAudioStatus] = useState<ListenerAudioStatus>('needs-unlock');
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [queuedAudioCount, setQueuedAudioCount] = useState(0);
   const [downloaded, setDownloaded] = useState(false);
   const [supported, setSupported] = useState<SupportedLanguages>({
     limited: false,
@@ -49,25 +65,48 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   const audioContextRef = useRef<AudioContext | null>(null);
   const nextAudioTimeRef = useRef(0);
   const pendingAudioRef = useRef<Array<{ audio: string; sampleRate: number }>>([]);
+  const isAudioEnabledRef = useRef(isAudioEnabled);
 
-  const ensureAudioContext = () => {
+  const getAudioStatusFromContext = useCallback((audioContext: AudioContext | null) => {
+    if (!isAudioEnabledRef.current) return 'disabled';
+    if (!audioContext || audioContext.state === 'closed') return 'needs-unlock';
+    if (pendingAudioRef.current.length > 0) return 'queued';
+    if (audioContext.state === 'running') return 'ready';
+    if (audioContext.state === 'suspended') return 'suspended';
+    return 'needs-unlock';
+  }, []);
+
+  const syncQueuedAudioCount = useCallback(() => {
+    setQueuedAudioCount(pendingAudioRef.current.length);
+  }, []);
+
+  const updateAudioStatus = useCallback((audioContext = audioContextRef.current) => {
+    setAudioStatus(getAudioStatusFromContext(audioContext));
+    syncQueuedAudioCount();
+  }, [getAudioStatusFromContext, syncQueuedAudioCount]);
+
+  const ensureAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContext.onstatechange = () => {
+        updateAudioStatus(audioContext);
+      };
+      audioContextRef.current = audioContext;
     }
-    if (audioContextRef.current.state === 'suspended') {
-      void audioContextRef.current.resume();
-    }
+    updateAudioStatus(audioContextRef.current);
     return audioContextRef.current;
-  };
+  }, [updateAudioStatus]);
 
   const resetAudioQueue = () => {
     nextAudioTimeRef.current = 0;
     pendingAudioRef.current = [];
     pendingAudioStartsRef.current = [];
+    syncQueuedAudioCount();
     if (audioContextRef.current) {
       void audioContextRef.current.close();
       audioContextRef.current = null;
     }
+    setAudioStatus(isAudioEnabledRef.current ? 'needs-unlock' : 'disabled');
   };
 
   const scheduleTextUpdate = (
@@ -157,11 +196,13 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   const flushPendingAudio = () => {
     const audioContext = audioContextRef.current;
     if (!audioContext || audioContext.state !== 'running') {
+      updateAudioStatus(audioContext);
       return;
     }
     const pending = pendingAudioRef.current;
     if (!pending.length) return;
     pendingAudioRef.current = [];
+    syncQueuedAudioCount();
     for (const item of pending) {
       const startAt = scheduleAudioPlayback(item.audio, item.sampleRate);
       if (startAt !== null) {
@@ -169,6 +210,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
         syncTranslationWithAudio();
       }
     }
+    updateAudioStatus(audioContext);
   };
 
   const scheduleAudioPlayback = (audioBase64: string, sampleRate: number) => {
@@ -176,45 +218,123 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
     const audioContext = ensureAudioContext();
     if (audioContext.state !== 'running') {
       pendingAudioRef.current.push({ audio: audioBase64, sampleRate });
-      void audioContext.resume().then(() => flushPendingAudio());
+      setAudioStatus('queued');
+      setAudioError(null);
+      syncQueuedAudioCount();
+      void audioContext.resume()
+        .then(() => flushPendingAudio())
+        .catch(() => {
+          setAudioStatus('needs-unlock');
+          setAudioError('Браузер заблокировал автозапуск. Нажмите "Включить озвучку".');
+        });
       return null;
     }
-    const binary = atob(audioBase64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    const pcm = new Int16Array(bytes.buffer);
-    const floats = new Float32Array(pcm.length);
-    for (let i = 0; i < pcm.length; i += 1) {
-      floats[i] = pcm[i] / 32768;
-    }
-    const buffer = audioContext.createBuffer(1, floats.length, sampleRate);
-    buffer.copyToChannel(floats, 0);
+    try {
+      const binary = atob(audioBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const pcm = new Int16Array(bytes.buffer);
+      const floats = new Float32Array(pcm.length);
+      for (let i = 0; i < pcm.length; i += 1) {
+        floats[i] = pcm[i] / 32768;
+      }
+      const buffer = audioContext.createBuffer(1, floats.length, sampleRate);
+      buffer.copyToChannel(floats, 0);
 
-    const source = audioContext.createBufferSource();
-    source.buffer = buffer;
-    source.connect(audioContext.destination);
-    const delaySeconds = textDelayMs / 1000;
-    const now = audioContext.currentTime;
-    const startAt = Math.max(now + delaySeconds, nextAudioTimeRef.current);
-    source.start(startAt);
-    nextAudioTimeRef.current = startAt + buffer.duration;
-    return startAt;
+      const source = audioContext.createBufferSource();
+      source.buffer = buffer;
+      source.connect(audioContext.destination);
+      source.onended = () => {
+        updateAudioStatus(audioContext);
+      };
+      const delaySeconds = textDelayMs / 1000;
+      const now = audioContext.currentTime;
+      const startAt = Math.max(now + delaySeconds, nextAudioTimeRef.current);
+      source.start(startAt);
+      nextAudioTimeRef.current = startAt + buffer.duration;
+      setAudioStatus('playing');
+      setAudioError(null);
+      return startAt;
+    } catch (error) {
+      setAudioStatus('error');
+      setAudioError(error instanceof Error ? error.message : 'Не удалось подготовить аудио.');
+      return null;
+    }
   };
 
-  useEffect(() => {
-    const handleFirstInteraction = () => {
+  const unlockAudioPlayback = useCallback(async () => {
+    try {
+      if (!isAudioEnabledRef.current) {
+        isAudioEnabledRef.current = true;
+        setIsAudioEnabled(true);
+      }
+      setAudioError(null);
       const audioContext = ensureAudioContext();
-      void audioContext.resume().then(() => {
+      if (audioContext.state !== 'running') {
+        await audioContext.resume();
+      }
+      if (audioContext.state !== 'running') {
+        setAudioStatus('needs-unlock');
+        return;
+      }
+      flushPendingAudio();
+      updateAudioStatus(audioContext);
+    } catch (error) {
+      setAudioStatus('error');
+      setAudioError(
+        error instanceof Error
+          ? error.message
+          : 'Браузер не разрешил включить озвучку. Повторите действие вручную.'
+      );
+    }
+  }, [ensureAudioContext, updateAudioStatus]);
+
+  useEffect(() => {
+    isAudioEnabledRef.current = isAudioEnabled;
+    updateAudioStatus();
+  }, [isAudioEnabled]);
+
+  useEffect(() => {
+    const handleAudioRestore = () => {
+      if (!isAudioEnabledRef.current) return;
+      const audioContext = audioContextRef.current;
+      if (!audioContext) {
+        updateAudioStatus(null);
+        return;
+      }
+      if (audioContext.state === 'running') {
         flushPendingAudio();
-      });
+        updateAudioStatus(audioContext);
+        return;
+      }
+      void audioContext.resume()
+        .then(() => {
+          flushPendingAudio();
+          updateAudioStatus(audioContext);
+        })
+        .catch(() => {
+          setAudioStatus(pendingAudioRef.current.length > 0 ? 'queued' : 'suspended');
+          setAudioError('Озвучка приостановлена браузером. Нажмите "Включить озвучку".');
+        });
     };
-    window.addEventListener('click', handleFirstInteraction, { once: true });
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        handleAudioRestore();
+      } else if (isAudioEnabledRef.current && audioContextRef.current?.state !== 'running') {
+        setAudioStatus(pendingAudioRef.current.length > 0 ? 'queued' : 'suspended');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleAudioRestore);
+    window.addEventListener('pageshow', handleAudioRestore);
     return () => {
-      window.removeEventListener('click', handleFirstInteraction);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleAudioRestore);
+      window.removeEventListener('pageshow', handleAudioRestore);
     };
-  }, []);
+  }, [updateAudioStatus]);
 
   useEffect(() => {
     setSourceLang(session.sourceLanguage || LANGUAGES[0]);
@@ -230,6 +350,13 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (isAudioEnabled) return;
+    pendingAudioRef.current = [];
+    pendingAudioStartsRef.current = [];
+    resetAudioQueue();
+  }, [isAudioEnabled]);
 
   const availableTargets = filterTargetLanguages(sourceLang.code, supported, LANGUAGES);
   const fallbackTarget = availableTargets[0] ?? LANGUAGES[0];
@@ -268,6 +395,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
 
     setTranscription('');
     setTranslation('');
+    setErrorMessage(null);
     pendingTranscriptionRef.current = [];
     pendingTranslationRef.current = [];
     translationTimeoutsRef.current.forEach((id) => window.clearTimeout(id));
@@ -284,6 +412,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
           setTranscription,
           payload.packet.text
         );
+        setErrorMessage(null);
         setStatus('live');
       },
       onTranslation: (payload) =>
@@ -291,7 +420,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
           ? enqueueTranslation(payload.packet.text)
           : undefined,
       onTts: (payload) => {
-        if (!isActive) return;
+        if (!isActive || !isAudioEnabledRef.current) return;
         if (payload.targetLanguage?.code !== targetLang.code) return;
         const startAt = scheduleAudioPlayback(payload.audio, payload.sampleRate);
         if (startAt !== null) {
@@ -305,15 +434,29 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
           if (resolved) setSourceLang(resolved);
         }
         setStatus(payload.status);
+        if (payload.status === 'live' || payload.status === 'connecting') {
+          setErrorMessage(null);
+        }
       },
-      onError: () => setStatus('stopped')
+      onError: (payload) => {
+        setErrorMessage(payload.message);
+        setStatus('stopped');
+        setIsActive(false);
+      },
+      onDisconnect: () => {
+        if (isActive) {
+          setErrorMessage('Соединение с комнатой закрыто. Нажмите старт, чтобы подключиться снова.');
+          setStatus('stopped');
+          setIsActive(false);
+        }
+      }
     });
     clientRef.current.connect();
   }, [isActive, session.id, targetLang.code]);
 
   const handleToggleActive = () => {
-    if (!isActive) {
-      ensureAudioContext();
+    if (!isActive && isAudioEnabled) {
+      void unlockAudioPlayback();
     }
     setIsActive((prev) => !prev);
   };
@@ -339,9 +482,55 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
   };
 
   const statusLabel =
-    status === 'live' ? 'Подключено' : status === 'connecting' ? 'Подключение...' : 'Не подключено';
+    status === 'live'
+      ? 'Подключено'
+      : status === 'reconnecting'
+        ? 'Переподключение...'
+        : status === 'disconnected'
+          ? 'Лектор отключился'
+          : status === 'connecting'
+            ? 'Подключение...'
+            : 'Не подключено';
   const statusDotClass =
-    status === 'live' ? 'bg-[#34C759]' : status === 'connecting' ? 'bg-yellow-400' : 'bg-[#FF3B30]';
+    status === 'live'
+      ? 'bg-[#34C759]'
+      : status === 'reconnecting'
+        ? 'bg-yellow-400'
+        : status === 'disconnected'
+          ? 'bg-orange-500'
+          : status === 'connecting'
+            ? 'bg-yellow-400'
+            : 'bg-[#FF3B30]';
+  const audioStatusLabel =
+    audioStatus === 'disabled'
+      ? 'Выключена'
+      : audioStatus === 'ready'
+        ? 'Готова'
+        : audioStatus === 'playing'
+          ? 'Воспроизведение'
+          : audioStatus === 'queued'
+            ? 'В очереди'
+            : audioStatus === 'suspended'
+              ? 'Пауза браузера'
+              : audioStatus === 'error'
+                ? 'Ошибка'
+                : 'Нужно включить';
+  const audioStatusDotClass =
+    audioStatus === 'ready' || audioStatus === 'playing'
+      ? 'bg-[#34C759]'
+      : audioStatus === 'queued'
+        ? 'bg-[#00A3FF]'
+        : audioStatus === 'disabled'
+          ? 'bg-gray-500'
+          : 'bg-yellow-400';
+  const audioActionLabel =
+    audioStatus === 'error'
+      ? 'Повторить озвучку'
+      : audioStatus === 'disabled'
+        ? 'Включить озвучку'
+        : audioStatus === 'ready' || audioStatus === 'playing'
+          ? 'Проверить'
+          : 'Включить озвучку';
 
   return (
     <div className="min-h-screen bg-transparent flex flex-col items-center pt-10 sm:pt-16 px-4 sm:px-8 relative">
@@ -357,6 +546,7 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
         <div className="flex flex-col items-center gap-2">
           <button
             onClick={handleToggleActive}
+            aria-label={isActive ? 'Остановить прием' : 'Начать прием'}
             className="w-16 h-16 bg-white rounded-full flex items-center justify-center hover:bg-gray-200 transition-all shadow-xl group"
           >
             <Play className="w-7 h-7 text-black fill-current group-hover:scale-110 transition-transform" />
@@ -420,11 +610,44 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
         </div>
 
         {/* Settings Icon */}
-        <div className="flex flex-col items-center gap-2">
-          <button className="w-16 h-16 flex items-center justify-center text-gray-500 hover:text-white transition-colors">
+        <div className="relative flex flex-col items-center gap-2 px-2">
+          <button
+            onClick={() => setShowSettings((prev) => !prev)}
+            aria-label="Настройки слушателя"
+            className="w-16 h-16 flex items-center justify-center text-gray-500 hover:text-white transition-colors"
+          >
             <Settings className="w-8 h-8" />
           </button>
           <div className="h-4" />
+          {showSettings && (
+            <div className="absolute top-16 right-0 z-[90] w-72 rounded-3xl border border-white/10 bg-[#0A0A0A]/95 backdrop-blur-xl shadow-[0_0_40px_rgba(0,0,0,0.4)] p-4 text-sm text-gray-200">
+              <div className="text-xs uppercase tracking-[0.2em] text-gray-500 mb-3">Настройки слушателя</div>
+              <label className="flex items-center justify-between gap-3 py-1">
+                <span>Озвучка перевода</span>
+                <input
+                  type="checkbox"
+                  checked={isAudioEnabled}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setIsAudioEnabled(next);
+                    if (next && isActive) {
+                      void unlockAudioPlayback();
+                    }
+                  }}
+                  className="accent-[#00A3FF]"
+                />
+              </label>
+              <label className="flex items-center justify-between gap-3 py-1">
+                <span>Показывать оригинал</span>
+                <input
+                  type="checkbox"
+                  checked={showOriginal}
+                  onChange={(e) => setShowOriginal(e.target.checked)}
+                  className="accent-[#00A3FF]"
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         {/* Connection Status */}
@@ -437,14 +660,55 @@ export const ListenerView: React.FC<ListenerViewProps> = ({ session, onExit }) =
         </div>
       </div>
 
-      {/* Main Content Side-by-Side Boxes */}
-      <div className="w-full max-w-[1200px] grid grid-cols-1 md:grid-cols-2 gap-10 pb-20">
-        {/* Left Box (Original) */}
-        <div className="relative md:h-[450px] bg-[#0A0A0A] border border-white/10 rounded-[50px] p-8 sm:p-12 lg:p-16 max-h-[60vh] md:max-h-[450px] overflow-y-auto flex items-start justify-center text-center shadow-[0_0_80px_rgba(255,255,255,0.05)]">
-          <p className="text-white text-lg sm:text-xl lg:text-2xl leading-relaxed font-light tracking-wide max-w-md text-reveal">
-            {transcription}
-          </p>
+      {errorMessage && (
+        <div className="-mt-6 mb-10 w-full max-w-3xl rounded-2xl border border-rose-400/40 bg-rose-500/10 px-5 py-4 text-center text-sm text-rose-100">
+          {errorMessage}
         </div>
+      )}
+
+      <div className="-mt-6 mb-10 w-full max-w-3xl rounded-2xl border border-white/10 bg-[#0A0A0A]/80 px-5 py-4 shadow-[0_0_40px_rgba(0,163,255,0.08)]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <div className={`w-3 h-3 rounded-full ${audioStatusDotClass}`} />
+              <span className="text-sm font-semibold text-gray-100">
+                Озвучка: {audioStatusLabel}
+              </span>
+              {queuedAudioCount > 0 && (
+                <span className="rounded-full border border-[#00A3FF]/40 bg-[#00A3FF]/10 px-3 py-1 text-xs font-semibold text-blue-100">
+                  очередь {queuedAudioCount}
+                </span>
+              )}
+            </div>
+            {audioError && (
+              <p className="mt-2 text-xs leading-relaxed text-yellow-100">
+                {audioError}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => void unlockAudioPlayback()}
+            className="shrink-0 rounded-full bg-white px-5 py-3 text-sm font-bold text-black transition-colors hover:bg-gray-200"
+          >
+            {audioActionLabel}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content Side-by-Side Boxes */}
+      <div
+        className={`w-full max-w-[1200px] grid grid-cols-1 ${
+          showOriginal ? 'md:grid-cols-2' : 'md:grid-cols-1'
+        } gap-10 pb-20`}
+      >
+        {/* Left Box (Original) */}
+        {showOriginal && (
+          <div className="relative md:h-[450px] bg-[#0A0A0A] border border-white/10 rounded-[50px] p-8 sm:p-12 lg:p-16 max-h-[60vh] md:max-h-[450px] overflow-y-auto flex items-start justify-center text-center shadow-[0_0_80px_rgba(255,255,255,0.05)]">
+            <p className="text-white text-lg sm:text-xl lg:text-2xl leading-relaxed font-light tracking-wide max-w-md text-reveal">
+              {transcription}
+            </p>
+          </div>
+        )}
 
         {/* Right Box (Translation) */}
         <div className="relative md:h-[450px] bg-[#050505] border border-[#00A3FF]/40 rounded-[50px] p-8 sm:p-12 lg:p-16 max-h-[60vh] md:max-h-[450px] overflow-y-auto flex items-start justify-center text-center shadow-[0_0_80px_rgba(0,163,255,0.2)]">

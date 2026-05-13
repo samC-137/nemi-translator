@@ -27,18 +27,19 @@ class FasterWhisperSTT:
         language: str = "",
     ) -> None:
         self._model = WhisperModel(model_name, device=device, compute_type=compute_type)
-        self._language = language or None
+        self._language = self._normalize_language(language)
 
-    async def transcribe(self, pcm_bytes: bytes) -> Optional[str]:
+    async def transcribe(self, pcm_bytes: bytes, language: Optional[str] = None) -> Optional[str]:
         if not pcm_bytes:
             return None
-        return await asyncio.to_thread(self._transcribe_sync, pcm_bytes)
+        language_hint = self._normalize_language(language) or self._language
+        return await asyncio.to_thread(self._transcribe_sync, pcm_bytes, language_hint)
 
-    def _transcribe_sync(self, pcm_bytes: bytes) -> Optional[str]:
+    def _transcribe_sync(self, pcm_bytes: bytes, language: Optional[str]) -> Optional[str]:
         audio = self._pcm16_to_float32(pcm_bytes)
         segments, _ = self._model.transcribe(
             audio,
-            language=self._language,
+            language=language,
             beam_size=1,
             vad_filter=False,
         )
@@ -74,3 +75,41 @@ class FasterWhisperSTT:
     def _pcm16_to_float32(pcm_bytes: bytes) -> np.ndarray:
         audio = np.frombuffer(pcm_bytes, dtype=np.int16).astype(np.float32)
         return audio / 32768.0
+
+    @staticmethod
+    def _normalize_language(language: Optional[str]) -> Optional[str]:
+        if not language:
+            return None
+        normalized = language.strip().lower()
+        if not normalized:
+            return None
+        aliases = {
+            "english": "en",
+            "russian": "ru",
+            "chinese": "zh",
+            "japanese": "ja",
+            "french": "fr",
+            "german": "de",
+            "spanish": "es",
+            "italian": "it",
+            "portuguese": "pt",
+            "dutch": "nl",
+            "polish": "pl",
+            "turkish": "tr",
+            "ukrainian": "uk",
+            "korean": "ko",
+        }
+        normalized = normalized.replace("(", " ").replace(")", " ").replace("/", " ").strip()
+        if normalized in aliases:
+            return aliases[normalized]
+        for sep in ("-", "_"):
+            if sep in normalized:
+                normalized = normalized.split(sep, 1)[0]
+                break
+        if " " in normalized:
+            normalized = normalized.split(" ", 1)[0]
+        if normalized in aliases:
+            return aliases[normalized]
+        if not normalized.isalpha() or len(normalized) > 3:
+            return None
+        return normalized

@@ -4,7 +4,7 @@ export type Language = {
   name: string;
 };
 
-export type RoomStatus = 'connecting' | 'live' | 'stopped';
+export type RoomStatus = 'connecting' | 'reconnecting' | 'live' | 'disconnected' | 'stopped';
 
 export const LANGUAGES: Language[] = [
   { code: 'en-US', name: 'English' },
@@ -28,6 +28,8 @@ export interface RoomSession {
   sourceLanguage: Language;
   targetLanguage: Language;
   status: RoomStatus;
+  token?: string;
+  role?: 'lecturer' | 'listener' | 'admin';
 }
 
 export interface StreamPacket {

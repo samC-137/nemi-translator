@@ -1,0 +1,11 @@
+services:
+  backend:
+    environment:
+      MT_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen2.5:7b-instruct
+      OLLAMA_TIMEOUT_SECONDS: 45
+      TRANSLATION_CONTEXT_SEGMENTS: 5
+      PHRASE_MIN_CHARS: 28
+      PHRASE_MAX_CHARS: 260
+      PHRASE_TIMEOUT_MS: 1800

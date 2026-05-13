@@ -24,6 +24,8 @@ class LLMTranscriber:
 
         if self._fake_transcripts:
             self._frames += 1
+            if self._provider == "fake":
+                return "Hello world. This is a short test lecture."
             if self._frames % 5 == 0:
                 return f"[{self._provider}] audio frames: {self._frames}"
             return None
@@ -43,7 +45,7 @@ class LatencyTracker:
             self._start_ms[room_id] = int(time.time() * 1000)
 
     def sample(self, room_id: str) -> Optional[int]:
-        start_ms = self._start_ms.get(room_id)
+        start_ms = self._start_ms.pop(room_id, None)
         if start_ms is None:
             return None
         return max(0, int(time.time() * 1000) - start_ms)

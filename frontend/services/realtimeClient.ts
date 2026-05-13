@@ -20,6 +20,7 @@ export type RealtimeClientOptions = {
   onTranscription?: (payload: StreamTranscriptionPayload) => void;
   onTranslation?: (payload: StreamTranslationPayload) => void;
   onTts?: (payload: StreamTtsPayload) => void;
+  onDisconnect?: () => void;
 };
 
 const resolveWsUrl = (baseUrl?: string, path = '/ws') => {
@@ -32,6 +33,7 @@ const resolveWsUrl = (baseUrl?: string, path = '/ws') => {
 export class RealtimeClient {
   private options: RealtimeClientOptions;
   private ws: WebSocket | null = null;
+  private closingByClient = false;
 
   constructor(options: RealtimeClientOptions) {
     this.options = options;
@@ -42,6 +44,7 @@ export class RealtimeClient {
     const url = resolveWsUrl(this.options.baseUrl, '/ws');
     const ws = new WebSocket(url);
     this.ws = ws;
+    this.closingByClient = false;
 
     ws.onopen = () => {
       this.send('room:join', {
@@ -72,8 +75,21 @@ export class RealtimeClient {
       if (eventName === 'stream:tts') this.options.onTts?.(payload);
     };
 
+    ws.onerror = () => {
+      this.options.onError?.({
+        roomId: this.options.roomId,
+        code: 'ws_error',
+        message: 'Не удалось подключиться к серверу комнаты',
+        fatal: true
+      });
+    };
+
     ws.onclose = () => {
       this.ws = null;
+      if (!this.closingByClient) {
+        this.options.onDisconnect?.();
+      }
+      this.closingByClient = false;
     };
   }
 
@@ -94,6 +110,7 @@ export class RealtimeClient {
         reason
       });
     }
+    this.closingByClient = true;
     this.ws.close();
     this.ws = null;
   }

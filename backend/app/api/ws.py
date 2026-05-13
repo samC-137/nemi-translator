@@ -70,6 +70,8 @@ async def _handle_room_join(payload: Dict[str, Any]) -> Optional[str]:
         )
     elif role == "lecturer" and source_language != "unknown":
         store.update_room_source_language(room_id, source_language)
+        if room.status in {"stopped", "disconnected", "reconnecting"}:
+            store.update_room_status(room_id, "connecting")
 
     store.add_participant(
         participant_id=participant_id,
@@ -85,6 +87,39 @@ async def _handle_room_join(payload: Dict[str, Any]) -> Optional[str]:
             status=room.status,
         )
     return participant_id
+
+
+def _resolve_disconnect_status(room_id: str, leaving_role: Optional[str] = None) -> str:
+    if store.get_participant_count(room_id) == 0:
+        return "stopped"
+    if leaving_role == "lecturer" or not store.has_role(room_id, "lecturer"):
+        return "disconnected"
+    return store.get_room(room_id).status if store.get_room(room_id) else "stopped"
+
+
+async def _sync_room_status_after_disconnect(
+    room_id: str,
+    leaving_role: Optional[str] = None,
+) -> None:
+    next_status = _resolve_disconnect_status(room_id, leaving_role)
+    store.update_room_status(room_id, next_status)
+    store.update_stream_state(
+        room_id=room_id,
+        listeners_count=store.get_listener_count(room_id),
+        status=next_status,
+    )
+    if next_status == "stopped":
+        await _broadcast_room_status(room_id, message="shutdown")
+    elif next_status == "disconnected":
+        await _broadcast_room_status(room_id, message="lecturer_disconnected")
+        await _broadcast_room_error(
+            room_id=room_id,
+            code="lecturer_disconnected",
+            message="Лектор отключился. Ожидаем повторное подключение.",
+            fatal=False,
+        )
+    else:
+        await _broadcast_room_status(room_id)
 
 
 async def _broadcast_room_status(room_id: str, message: Optional[str] = None) -> None:
@@ -282,11 +317,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not store.get_room(room_id):
                     await websocket.close(code=1008)
                     return
-                store.update_room_status(room_id, "connecting")
+                store.update_room_status(room_id, "reconnecting")
                 store.update_stream_state(
                     room_id=room_id,
                     listeners_count=store.get_listener_count(room_id),
-                    status="connecting",
+                    status="reconnecting",
                 )
                 await connections.add(room_id, websocket)
                 await _broadcast_room_status(room_id, message="reconnecting")
@@ -300,22 +335,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not isinstance(leave_room, str) or not leave_room:
                     await websocket.close(code=1008)
                     return
+                role = None
                 if participant_id:
-                    store.remove_participant(participant_id)
+                    participant = store.remove_participant(participant_id)
+                    role = participant.role if participant else None
                 if room_id:
                     connections.remove(room_id, websocket)
-                    if store.get_listener_count(room_id) == 0:
-                        store.update_room_status(room_id, "stopped")
-                        await _broadcast_room_status(room_id, message="shutdown")
-                    room = store.get_room(room_id)
-                    if room:
-                        store.update_stream_state(
-                            room_id=room_id,
-                            listeners_count=store.get_listener_count(room_id),
-                            status=room.status,
-                        )
-                    if store.get_listener_count(room_id) != 0:
-                        await _broadcast_room_status(room_id)
+                    await _sync_room_status_after_disconnect(
+                        room_id,
+                        role or payload.get("role"),
+                    )
                     await _broadcast_listener_count(room_id)
                 await websocket.close(code=1000)
                 return
@@ -324,22 +353,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 return
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
+        role = None
         if participant_id:
-            store.remove_participant(participant_id)
+            participant = store.remove_participant(participant_id)
+            role = participant.role if participant else None
         if room_id:
             connections.remove(room_id, websocket)
-            if store.get_listener_count(room_id) == 0:
-                store.update_room_status(room_id, "stopped")
-                await _broadcast_room_status(room_id, message="shutdown")
-            room = store.get_room(room_id)
-            if room:
-                store.update_stream_state(
-                    room_id=room_id,
-                    listeners_count=store.get_listener_count(room_id),
-                    status=room.status,
-                )
-            if store.get_listener_count(room_id) != 0:
-                await _broadcast_room_status(room_id)
+            await _sync_room_status_after_disconnect(room_id, role)
             await _broadcast_listener_count(room_id)
     except Exception as exc:
         logger.exception("WebSocket error")

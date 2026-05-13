@@ -75,6 +75,10 @@ def main() -> None:
 
     if os.getenv("MT_PROVIDER") == "marian":
         repos.extend(_collect_marian_repos(os.getenv("MT_MODELS", "")))
+    if os.getenv("MT_PROVIDER") == "nllb":
+        mt_model = os.getenv("MT_MODEL", "facebook/nllb-200-distilled-600M")
+        if mt_model and not os.path.isabs(mt_model):
+            repos.append(mt_model)
 
     repos = sorted(set(repos))
     if not repos:

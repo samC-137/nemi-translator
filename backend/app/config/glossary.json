@@ -1,0 +1,46 @@
+{
+  "terms": [
+    {
+      "source": "speech recognition",
+      "translations": {
+        "ru-RU": "распознавание речи",
+        "es-ES": "reconocimiento de voz"
+      }
+    },
+    {
+      "source": "latency",
+      "translations": {
+        "ru-RU": "задержка",
+        "es-ES": "latencia"
+      }
+    },
+    {
+      "source": "listener",
+      "translations": {
+        "ru-RU": "слушатель",
+        "es-ES": "oyente"
+      }
+    },
+    {
+      "source": "lecturer",
+      "translations": {
+        "ru-RU": "лектор",
+        "es-ES": "ponente"
+      }
+    },
+    {
+      "source": "translation queue",
+      "translations": {
+        "ru-RU": "очередь перевода",
+        "es-ES": "cola de traduccion"
+      }
+    },
+    {
+      "source": "controlled delay",
+      "translations": {
+        "ru-RU": "управляемая задержка",
+        "es-ES": "retraso controlado"
+      }
+    }
+  ]
+}

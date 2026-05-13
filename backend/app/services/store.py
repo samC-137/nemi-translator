@@ -12,8 +12,10 @@ class InMemoryStore:
         self._stream_states: Dict[str, StreamState] = {}
         self._admin_actions: List[dict] = []
         self._transcription_history: Dict[str, str] = {}
+        self._transcription_segments: Dict[str, List[str]] = {}
         self._translation_history: Dict[str, Dict[str, str]] = {}
         self._max_history_chars = 20000
+        self._max_context_segments = 40
 
     def create_room(
         self,
@@ -91,12 +93,16 @@ class InMemoryStore:
             return list(self._participants.values())
         return [p for p in self._participants.values() if p.room_id == room_id]
 
+    def list_listeners(self, room_id: str) -> List[Participant]:
+        return [
+            p
+            for p in self._participants.values()
+            if p.room_id == room_id and p.role == "listener"
+        ]
+
     def list_listener_languages(self, room_id: str) -> List[str]:
-        participants = self.list_participants(room_id)
         languages = []
-        for participant in participants:
-            if participant.role != "listener":
-                continue
+        for participant in self.list_listeners(room_id):
             if participant.target_language:
                 languages.append(participant.target_language)
         return languages
@@ -137,8 +143,23 @@ class InMemoryStore:
     def get_stream_state(self, room_id: str) -> Optional[StreamState]:
         return self._stream_states.get(room_id)
 
-    def get_listener_count(self, room_id: str) -> int:
+    def get_participant_count(self, room_id: str) -> int:
         return len([p for p in self._participants.values() if p.room_id == room_id])
+
+    def get_role_count(self, room_id: str, role: str) -> int:
+        return len(
+            [
+                p
+                for p in self._participants.values()
+                if p.room_id == room_id and p.role == role
+            ]
+        )
+
+    def has_role(self, room_id: str, role: str) -> bool:
+        return self.get_role_count(room_id, role) > 0
+
+    def get_listener_count(self, room_id: str) -> int:
+        return len(self.list_listeners(room_id))
 
     def log_admin_action(self, room_id: str, action: str) -> None:
         self._admin_actions.append(
@@ -157,6 +178,12 @@ class InMemoryStore:
             return
         current = self._transcription_history.get(room_id, "")
         self._transcription_history[room_id] = self._append_text(current, text)
+        segments = self._transcription_segments.setdefault(room_id, [])
+        cleaned = text.strip()
+        if cleaned:
+            segments.append(cleaned)
+        if len(segments) > self._max_context_segments:
+            del segments[: len(segments) - self._max_context_segments]
 
     def append_translation(self, room_id: str, target_language: str, text: str) -> None:
         if not text or not target_language:
@@ -167,6 +194,11 @@ class InMemoryStore:
 
     def get_transcription_history(self, room_id: str) -> str:
         return self._transcription_history.get(room_id, "")
+
+    def get_recent_transcription_segments(self, room_id: str, limit: int) -> List[str]:
+        if limit <= 0:
+            return []
+        return self._transcription_segments.get(room_id, [])[-limit:]
 
     def get_translation_history(self, room_id: str, target_language: str) -> str:
         if not target_language:

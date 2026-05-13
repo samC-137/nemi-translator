@@ -10,14 +10,23 @@ import {
 } from '../services/supportedLanguages';
 
 interface LobbyProps {
-  onCreateRoom: (lang: Language) => void;
-  onJoinRoom: (roomId: string) => void;
+  error?: string | null;
+  isSubmitting?: boolean;
+  onCreateRoom: (lang: Language) => void | Promise<void>;
+  onJoinRoom: (roomId: string, targetLang: Language) => void | Promise<void>;
 }
 
-export const Lobby: React.FC<LobbyProps> = ({ onCreateRoom, onJoinRoom }) => {
+export const Lobby: React.FC<LobbyProps> = ({
+  error,
+  isSubmitting = false,
+  onCreateRoom,
+  onJoinRoom
+}) => {
   const [mode, setMode] = useState<'initial' | 'create' | 'join'>('initial');
   const [roomId, setRoomId] = useState('');
+  const [roomIdError, setRoomIdError] = useState<string | null>(null);
   const [selectedLang, setSelectedLang] = useState<Language>(LANGUAGES[0]);
+  const [selectedTargetLang, setSelectedTargetLang] = useState<Language>(LANGUAGES[1] ?? LANGUAGES[0]);
   const [supported, setSupported] = useState<SupportedLanguages>({
     limited: false,
     sources: [],
@@ -36,12 +45,28 @@ export const Lobby: React.FC<LobbyProps> = ({ onCreateRoom, onJoinRoom }) => {
 
   const availableSources = filterSourceLanguages(supported, LANGUAGES);
   const fallbackSource = availableSources[0] ?? LANGUAGES[0];
+  const normalizedRoomId = roomId.trim().toUpperCase();
+  const isRoomIdValid = /^NEMI-\d{4}$/.test(normalizedRoomId);
+  const targetCodes = new Set(
+    Object.values(supported.targetsBySource).flat()
+  );
+  const availableJoinTargets =
+    supported.limited && targetCodes.size > 0
+      ? LANGUAGES.filter((lang) => targetCodes.has(lang.code))
+      : LANGUAGES;
+  const fallbackTarget = availableJoinTargets[0] ?? LANGUAGES[0];
 
   useEffect(() => {
     if (!availableSources.find((lang) => lang.code === selectedLang.code)) {
       setSelectedLang(fallbackSource);
     }
   }, [availableSources, fallbackSource.code, selectedLang.code]);
+
+  useEffect(() => {
+    if (!availableJoinTargets.find((lang) => lang.code === selectedTargetLang.code)) {
+      setSelectedTargetLang(fallbackTarget);
+    }
+  }, [availableJoinTargets, fallbackTarget.code, selectedTargetLang.code]);
 
   return (
     <div className="min-h-screen bg-black flex flex-col items-center justify-center p-6">
@@ -50,6 +75,12 @@ export const Lobby: React.FC<LobbyProps> = ({ onCreateRoom, onJoinRoom }) => {
       </div>
 
       <div className="w-full max-w-md space-y-6">
+        {error && (
+          <div className="rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+            {error}
+          </div>
+        )}
+
         {mode === 'initial' && (
           <div className="flex flex-col gap-4">
             <button
@@ -115,10 +146,11 @@ export const Lobby: React.FC<LobbyProps> = ({ onCreateRoom, onJoinRoom }) => {
                 Back
               </button>
               <button 
+                disabled={isSubmitting}
                 onClick={() => onCreateRoom(selectedLang)}
-                className="flex-[2] px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-all shadow-lg shadow-blue-500/20"
+                className="flex-[2] px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold transition-all shadow-lg shadow-blue-500/20"
               >
-                Create Room
+                {isSubmitting ? 'Creating...' : 'Create Room'}
               </button>
             </div>
           </div>
@@ -132,9 +164,33 @@ export const Lobby: React.FC<LobbyProps> = ({ onCreateRoom, onJoinRoom }) => {
                 type="text"
                 placeholder="e.g. NEMI-4293"
                 value={roomId}
-                onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+                onChange={(e) => {
+                  setRoomId(e.target.value.toUpperCase());
+                  setRoomIdError(null);
+                }}
                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-center text-2xl font-mono tracking-widest focus:outline-none focus:border-blue-500/50 transition-all"
               />
+              {roomIdError && (
+                <p className="text-center text-sm text-rose-200">{roomIdError}</p>
+              )}
+              <div className="space-y-3">
+                <label className="block text-sm text-gray-400 px-1">Target Language</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {availableJoinTargets.map((lang) => (
+                    <button
+                      key={lang.code}
+                      onClick={() => setSelectedTargetLang(lang)}
+                      className={`px-4 py-2 rounded-lg text-sm border transition-all ${
+                        selectedTargetLang.code === lang.code
+                          ? 'bg-blue-600 border-blue-400 text-white'
+                          : 'bg-black/40 border-white/10 text-gray-400 hover:border-white/30'
+                      }`}
+                    >
+                      {lang.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="flex gap-3">
               <button 
@@ -144,11 +200,17 @@ export const Lobby: React.FC<LobbyProps> = ({ onCreateRoom, onJoinRoom }) => {
                 Back
               </button>
               <button 
-                disabled={!roomId}
-                onClick={() => onJoinRoom(roomId)}
+                disabled={!roomId || isSubmitting}
+                onClick={() => {
+                  if (!isRoomIdValid) {
+                    setRoomIdError('Введите код комнаты в формате NEMI-1234');
+                    return;
+                  }
+                  onJoinRoom(normalizedRoomId, selectedTargetLang);
+                }}
                 className="flex-[2] px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold transition-all shadow-lg shadow-blue-500/20"
               >
-                Join Room
+                {isSubmitting ? 'Joining...' : 'Join Room'}
               </button>
             </div>
           </div>

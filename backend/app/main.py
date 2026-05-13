@@ -14,6 +14,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+logging.getLogger("faster_whisper").setLevel(logging.WARNING)
 logger = logging.getLogger("nemi")
 
 app = FastAPI(title=settings.app_name, version="0.1.0")

@@ -362,6 +362,12 @@ Translation quality smoke:
 docker compose exec backend python -m app.scripts.smoke_translation_quality
 ```
 
+TTS smoke:
+
+```bash
+docker compose exec backend python -m app.scripts.smoke_tts
+```
+
 Audio pipeline smoke:
 
 ```bash

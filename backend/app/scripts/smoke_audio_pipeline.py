@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -124,23 +125,37 @@ async def main() -> None:
             )
             elapsed_ms = int((time.monotonic() - started_at) * 1000)
 
-    transcription = events["stream:transcription"]["payload"]["packet"]["text"]
-    translation = events["stream:translation"]["payload"]["packet"]["text"]
-    tts_audio = events["stream:tts"]["payload"]["audio"]
+    transcription_event = events["stream:transcription"]
+    translation_event = events["stream:translation"]
+    tts_event = events["stream:tts"]
+    transcription = transcription_event["payload"]["packet"]["text"]
+    translation = translation_event["payload"]["packet"]["text"]
+    tts_payload = tts_event["payload"]
+    tts_audio = tts_payload["audio"]
+    tts_sample_rate = tts_payload["sampleRate"]
+    tts_target_language = tts_payload["targetLanguage"]["code"]
+    tts_audio_bytes = base64.b64decode(tts_audio)
     detail = get(f"/admin/rooms/{room_id}", admin_token)
     latency_ms = detail["latency"]
     assert transcription
     assert translation
     assert tts_audio
+    assert len(tts_audio_bytes) >= 1024
+    assert isinstance(tts_sample_rate, int) and tts_sample_rate > 0
+    assert tts_target_language == "ru-RU"
     assert isinstance(latency_ms, int)
     print(
         json.dumps(
             {
                 "status": "ok",
                 "roomId": room_id,
+                "events": sorted(events),
                 "transcription": transcription,
                 "translation": translation,
                 "ttsBytesBase64": len(tts_audio),
+                "ttsBytesRaw": len(tts_audio_bytes),
+                "ttsSampleRate": tts_sample_rate,
+                "ttsTargetLanguage": tts_target_language,
                 "elapsedMs": elapsed_ms,
                 "backendLatencyMs": latency_ms,
             },

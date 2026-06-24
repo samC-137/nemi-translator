@@ -60,7 +60,7 @@ def make_test_audio() -> bytes:
     tts = PiperTTS(model_path)
     raw = tts._synthesize_sync("Hello world. This is a short test lecture.")
     speech = resample_pcm16(raw, tts.sample_rate, 16000)
-    silence = np.zeros(16000, dtype=np.int16).tobytes()
+    silence = np.zeros(16000 * 2, dtype=np.int16).tobytes()
     return speech + silence
 
 
@@ -118,7 +118,7 @@ async def main() -> None:
                 for start in range(0, len(audio), chunk_size):
                     await audio_ws.send(audio[start : start + chunk_size])
                     await asyncio.sleep(0.01)
-                await asyncio.sleep(1.1)
+                await asyncio.sleep(2.0)
 
             events = await recv_until(
                 listener,

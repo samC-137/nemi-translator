@@ -64,7 +64,46 @@ def main() -> None:
     assert detail["roomId"] == room_id
     assert detail["listenersCount"] == 0
 
-    print(json.dumps({"status": "ok", "roomId": room_id}, ensure_ascii=False))
+    _, system_status = request("/admin/system/status", token=token)
+    assert system_status["profile"], system_status
+    assert system_status["sttProvider"], system_status
+    assert system_status["mtProvider"], system_status
+    assert system_status["ttsProvider"], system_status
+
+    _, restarted = request(
+        f"/admin/rooms/{room_id}/restart",
+        method="POST",
+        token=token,
+    )
+    assert restarted["status"] == "connecting", restarted
+
+    _, reset = request(
+        f"/admin/rooms/{room_id}/reset-listeners",
+        method="POST",
+        token=token,
+    )
+    assert reset["removed"] == 0, reset
+
+    _, stopped = request(
+        f"/admin/rooms/{room_id}/stop",
+        method="POST",
+        token=token,
+    )
+    assert stopped["status"] == "stopped", stopped
+
+    _, stopped_detail = request(f"/admin/rooms/{room_id}", token=token)
+    assert stopped_detail["status"] == "stopped", stopped_detail
+
+    print(
+        json.dumps(
+            {
+                "status": "ok",
+                "roomId": room_id,
+                "adminLifecycle": "restart-reset-stop",
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -365,7 +365,12 @@ export const AdminRoomView: React.FC = () => {
   const [transcription, setTranscription] = useState('');
   const [translation, setTranslation] = useState('');
   const [streamStatus, setStreamStatus] = useState<RoomStatus>('connecting');
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<'stop' | 'reset' | 'restart' | null>(null);
+  const [actionNotice, setActionNotice] = useState<{
+    kind: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const clientRef = useRef<RealtimeClient | null>(null);
 
   useEffect(() => {
@@ -394,6 +399,7 @@ export const AdminRoomView: React.FC = () => {
     if (!room) return;
     setTranscription('');
     setTranslation('');
+    setStreamError(null);
     clientRef.current?.disconnect();
     clientRef.current = new RealtimeClient({
       roomId: room.id,
@@ -404,8 +410,21 @@ export const AdminRoomView: React.FC = () => {
         setStreamStatus('live');
       },
       onTranslation: (payload) => setTranslation(payload.packet.text),
-      onStatus: (payload) => setStreamStatus(payload.status),
-      onError: () => setStreamStatus('stopped')
+      onStatus: (payload) => {
+        setStreamStatus(payload.status);
+        setRoom((current) => current ? { ...current, status: payload.status } : current);
+      },
+      onListenerCount: (payload) => {
+        setRoom((current) => current ? { ...current, listenersCount: payload.count } : current);
+      },
+      onError: (payload) => {
+        setStreamError(payload.message);
+        if (payload.fatal) setStreamStatus('stopped');
+      },
+      onDisconnect: () => {
+        setStreamStatus('disconnected');
+        setStreamError('Соединение с потоком комнаты прервано');
+      }
     });
     clientRef.current.connect();
     return () => {
@@ -420,16 +439,27 @@ export const AdminRoomView: React.FC = () => {
     setStreamStatus(nextRoom.status);
   };
 
-  const handleAction = async (label: string, action: () => Promise<unknown>) => {
-    setActionMessage(null);
+  const handleAction = async (
+    actionKey: 'stop' | 'reset' | 'restart',
+    label: string,
+    confirmation: string,
+    action: () => Promise<unknown>
+  ) => {
+    if (!window.confirm(confirmation)) return;
+    setPendingAction(actionKey);
+    setActionNotice(null);
     try {
       await action();
       await reloadRoom();
-      setActionMessage(`Действие "${label}" выполнено`);
+      setActionNotice({ kind: 'success', message: `Действие «${label}» выполнено` });
     } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : `Не удалось выполнить "${label}"`);
+      setActionNotice({
+        kind: 'error',
+        message: err instanceof Error ? err.message : `Не удалось выполнить «${label}»`
+      });
+    } finally {
+      setPendingAction(null);
     }
-    window.setTimeout(() => setActionMessage(null), 2200);
   };
 
   if (isLoadingRoom) {
@@ -475,34 +505,65 @@ export const AdminRoomView: React.FC = () => {
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() =>
-                void handleAction('Остановить комнату', () => stopAdminRoom(room.id))
+                void handleAction(
+                  'stop',
+                  'Остановить комнату',
+                  `Остановить комнату ${room.id}?`,
+                  () => stopAdminRoom(room.id)
+                )
               }
-              className="rounded-full border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-rose-200 transition hover:border-rose-400/70"
+              disabled={pendingAction !== null}
+              className="rounded-full border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-rose-200 transition hover:border-rose-400/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Остановить комнату
+              {pendingAction === 'stop' ? 'Останавливаем...' : 'Остановить комнату'}
             </button>
             <button
               onClick={() =>
-                void handleAction('Сброс слушателей', () => resetAdminRoomListeners(room.id))
+                void handleAction(
+                  'reset',
+                  'Сброс слушателей',
+                  `Отключить всех слушателей комнаты ${room.id}?`,
+                  () => resetAdminRoomListeners(room.id)
+                )
               }
-              className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-200 transition hover:border-white/30"
+              disabled={pendingAction !== null}
+              className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-200 transition hover:border-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Сброс слушателей
+              {pendingAction === 'reset' ? 'Сбрасываем...' : 'Сброс слушателей'}
             </button>
             <button
               onClick={() =>
-                void handleAction('Перезапустить поток', () => restartAdminRoom(room.id))
+                void handleAction(
+                  'restart',
+                  'Перезапустить поток',
+                  `Перезапустить поток комнаты ${room.id}?`,
+                  () => restartAdminRoom(room.id)
+                )
               }
-              className="rounded-full border border-[#00A3FF]/30 bg-[#00A3FF]/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#7CC6FF] transition hover:border-[#00A3FF]/60"
+              disabled={pendingAction !== null}
+              className="rounded-full border border-[#00A3FF]/30 bg-[#00A3FF]/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#7CC6FF] transition hover:border-[#00A3FF]/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7CC6FF] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Перезапустить поток
+              {pendingAction === 'restart' ? 'Перезапуск...' : 'Перезапустить поток'}
             </button>
           </div>
         </div>
 
-        {actionMessage && (
-          <div className="rounded-2xl border border-[#00A3FF]/30 bg-[#00A3FF]/10 px-4 py-3 text-sm text-[#7CC6FF]">
-            {actionMessage}
+        {actionNotice && (
+          <div
+            role={actionNotice.kind === 'error' ? 'alert' : 'status'}
+            className={`rounded-2xl border px-4 py-3 text-sm ${
+              actionNotice.kind === 'error'
+                ? 'border-rose-400/40 bg-rose-500/10 text-rose-100'
+                : 'border-[#00A3FF]/30 bg-[#00A3FF]/10 text-[#7CC6FF]'
+            }`}
+          >
+            {actionNotice.message}
+          </div>
+        )}
+
+        {streamError && (
+          <div role="alert" className="rounded-2xl border border-amber-300/40 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+            {streamError}
           </div>
         )}
 

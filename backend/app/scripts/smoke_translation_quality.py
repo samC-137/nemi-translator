@@ -31,13 +31,23 @@ class _OllamaHandler(BaseHTTPRequestHandler):
 
 
 def test_phrase_aggregation() -> None:
-    aggregator = PhraseAggregator(min_chars=20, max_chars=80, timeout_ms=1000)
-    assert aggregator.push("Speech", now_ms=0) is None
-    assert aggregator.push("recognition latency matters.", now_ms=200) == (
-        "Speech recognition latency matters."
+    aggregator = PhraseAggregator(
+        max_sentences=2,
+        max_chars=80,
+        inactivity_ms=1000,
+        max_age_ms=10_000,
     )
+    assert aggregator.push("Speech", now_ms=0) is None
+    assert aggregator.push("recognition latency matters.", now_ms=200) is None
+    result = aggregator.push("Context improves translation.", now_ms=400)
+    assert result is not None
+    assert result.text == "Speech recognition latency matters. Context improves translation."
+    assert result.reason == "sentence_limit"
     assert aggregator.push("short", now_ms=1000) is None
-    assert aggregator.flush_due(now_ms=2100) == "short"
+    result = aggregator.flush_due(now_ms=2000)
+    assert result is not None
+    assert result.text == "short"
+    assert result.reason == "inactivity"
 
 
 def test_context_prompt_and_glossary() -> None:

@@ -89,66 +89,95 @@ def normalize_translation_text(text: str) -> str:
     return cleaned
 
 
+@dataclass(frozen=True)
+class PhraseFlush:
+    text: str
+    reason: str
+    age_ms: int
+    sentence_count: int
+
+
+def _sentence_count(text: str) -> int:
+    return len(re.findall(r"[.!?]+(?=\s|$)", text))
+
+
 class PhraseAggregator:
     def __init__(
         self,
-        min_chars: int,
+        max_sentences: int,
         max_chars: int,
-        timeout_ms: int,
+        inactivity_ms: int,
+        max_age_ms: int,
     ) -> None:
-        self._min_chars = max(1, min_chars)
-        self._max_chars = max(self._min_chars, max_chars)
-        self._timeout_ms = max(0, timeout_ms)
+        self._max_sentences = max(1, max_sentences)
+        self._max_chars = max(1, max_chars)
+        self._inactivity_ms = max(1, inactivity_ms)
+        self._max_age_ms = max(1, max_age_ms)
         self._parts: list[str] = []
         self._first_seen_ms: Optional[int] = None
+        self._last_seen_ms: Optional[int] = None
 
-    def push(self, text: str, now_ms: Optional[int] = None) -> Optional[str]:
+    def push(self, text: str, now_ms: Optional[int] = None) -> Optional[PhraseFlush]:
         cleaned = normalize_translation_text(text)
         if not cleaned:
             return None
         now = now_ms if now_ms is not None else int(time.time() * 1000)
         if self._first_seen_ms is None:
             self._first_seen_ms = now
+        self._last_seen_ms = now
         self._parts.append(cleaned)
         phrase = self._current_phrase()
-        if self._should_flush(phrase, now):
-            return self.flush()
+        if len(phrase) >= self._max_chars:
+            return self.flush("max_chars", now)
+        if _sentence_count(phrase) >= self._max_sentences:
+            return self.flush("sentence_limit", now)
+        if now - self._first_seen_ms >= self._max_age_ms:
+            return self.flush("max_age", now)
         return None
 
-    def flush_due(self, now_ms: Optional[int] = None) -> Optional[str]:
+    def flush_due(self, now_ms: Optional[int] = None) -> Optional[PhraseFlush]:
+        if self._first_seen_ms is None or self._last_seen_ms is None:
+            return None
+        now = now_ms if now_ms is not None else int(time.time() * 1000)
+        if now - self._first_seen_ms >= self._max_age_ms:
+            return self.flush("max_age", now)
+        if now - self._last_seen_ms >= self._inactivity_ms:
+            return self.flush("inactivity", now)
+        return None
+
+    def flush(
+        self,
+        reason: str = "manual_flush",
+        now_ms: Optional[int] = None,
+    ) -> Optional[PhraseFlush]:
         if not self._parts or self._first_seen_ms is None:
             return None
         now = now_ms if now_ms is not None else int(time.time() * 1000)
-        if self._timeout_ms and now - self._first_seen_ms >= self._timeout_ms:
-            return self.flush()
-        return None
-
-    def flush(self) -> Optional[str]:
         phrase = self._current_phrase()
+        result = PhraseFlush(
+            text=phrase,
+            reason=reason,
+            age_ms=max(0, now - self._first_seen_ms),
+            sentence_count=_sentence_count(phrase),
+        )
         self._parts = []
         self._first_seen_ms = None
-        return phrase or None
+        self._last_seen_ms = None
+        return result
 
     def has_pending(self) -> bool:
         return bool(self._parts)
 
+    def next_deadline_ms(self) -> Optional[int]:
+        if self._first_seen_ms is None or self._last_seen_ms is None:
+            return None
+        return min(
+            self._last_seen_ms + self._inactivity_ms,
+            self._first_seen_ms + self._max_age_ms,
+        )
+
     def _current_phrase(self) -> str:
         return normalize_translation_text(" ".join(self._parts))
-
-    def _should_flush(self, phrase: str, now_ms: int) -> bool:
-        if not phrase:
-            return False
-        if len(phrase) >= self._max_chars:
-            return True
-        if len(phrase) >= self._min_chars and phrase[-1] in ".!?;:":
-            return True
-        if (
-            self._first_seen_ms is not None
-            and self._timeout_ms
-            and now_ms - self._first_seen_ms >= self._timeout_ms
-        ):
-            return True
-        return False
 
 
 def build_context_prompt(

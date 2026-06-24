@@ -33,6 +33,9 @@ pnpm-debug.log*
 # coverage
 coverage/
 
+# local Git worktrees
+.worktrees/
+
 # OS files
 .DS_Store
 Thumbs.db

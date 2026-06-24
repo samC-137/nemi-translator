@@ -43,10 +43,12 @@ const getStatusLabel = (status: RoomStatus) => {
   return 'Stopped';
 };
 
-const AdminRoomRow: React.FC<{ room: AdminRoom; onOpen: (id: string) => void }> = ({
-  room,
-  onOpen
-}) => {
+const AdminRoomRow: React.FC<{
+  room: AdminRoom;
+  onOpen: (id: string) => void;
+  onStop: (room: AdminRoom) => void;
+  isStopping: boolean;
+}> = ({ room, onOpen, onStop, isStopping }) => {
   const styles = statusStyles[room.status];
 
   return (
@@ -81,10 +83,13 @@ const AdminRoomRow: React.FC<{ room: AdminRoom; onOpen: (id: string) => void }> 
           Открыть
         </button>
         <button
-          className="flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-gray-300 transition hover:border-white/30"
+          type="button"
+          onClick={() => onStop(room)}
+          disabled={isStopping}
+          className="flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-gray-300 transition hover:border-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Power className="h-3.5 w-3.5" />
-          Стоп
+          {isStopping ? 'Останавливаем...' : 'Стоп'}
         </button>
       </div>
     </div>
@@ -101,6 +106,11 @@ export const AdminView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [systemError, setSystemError] = useState<string | null>(null);
+  const [stoppingRoomId, setStoppingRoomId] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<{
+    kind: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const loadRooms = async (showLoading = false) => {
     if (showLoading) setIsLoading(true);
@@ -134,6 +144,24 @@ export const AdminView: React.FC = () => {
     }, 2000);
     return () => window.clearInterval(pollingId);
   }, []);
+
+  const handleStopRoom = async (room: AdminRoom) => {
+    if (!window.confirm(`Остановить комнату ${room.id}?`)) return;
+    setStoppingRoomId(room.id);
+    setActionNotice(null);
+    try {
+      await stopAdminRoom(room.id);
+      await loadRooms(false);
+      setActionNotice({ kind: 'success', message: `Комната ${room.id} остановлена` });
+    } catch (err) {
+      setActionNotice({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Не удалось остановить комнату'
+      });
+    } finally {
+      setStoppingRoomId(null);
+    }
+  };
 
   const filteredRooms = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -253,6 +281,19 @@ export const AdminView: React.FC = () => {
           </div>
         )}
 
+        {actionNotice && (
+          <div
+            role={actionNotice.kind === 'error' ? 'alert' : 'status'}
+            className={`rounded-3xl border px-6 py-4 text-sm ${
+              actionNotice.kind === 'error'
+                ? 'border-rose-400/40 bg-rose-500/10 text-rose-100'
+                : 'border-emerald-400/40 bg-emerald-500/10 text-emerald-100'
+            }`}
+          >
+            {actionNotice.message}
+          </div>
+        )}
+
         <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-black/40 p-5 md:flex-row md:items-center md:justify-between">
           <div className="relative w-full md:max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
@@ -301,7 +342,13 @@ export const AdminView: React.FC = () => {
             </div>
           )}
           {!isLoading && filteredRooms.map((room) => (
-            <AdminRoomRow key={room.id} room={room} onOpen={(id) => navigate(`/admin/room/${id}`)} />
+            <AdminRoomRow
+              key={room.id}
+              room={room}
+              onOpen={(id) => navigate(`/admin/room/${id}`)}
+              onStop={(selectedRoom) => void handleStopRoom(selectedRoom)}
+              isStopping={stoppingRoomId === room.id}
+            />
           ))}
         </div>
       </div>

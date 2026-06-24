@@ -1,10 +1,11 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminView } from './AdminView';
 import {
   fetchAdminRooms,
-  fetchAdminSystemStatus
+  fetchAdminSystemStatus,
+  stopAdminRoom
 } from '../services/adminApi';
 
 vi.mock('../services/adminApi', () => ({
@@ -101,5 +102,39 @@ describe('AdminView dashboard', () => {
 
     expect(screen.getByText('Комната NEMI-1001')).toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('Не удалось загрузить статус системы');
+  });
+
+  it('stops a room from the dashboard and refreshes backend data', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(stopAdminRoom).mockResolvedValue({ roomId: room.id, status: 'stopped' });
+    renderDashboard();
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Стоп' }));
+    await flushPromises();
+
+    expect(stopAdminRoom).toHaveBeenCalledWith('NEMI-1001');
+    expect(fetchAdminRooms).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not stop a room when confirmation is cancelled', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderDashboard();
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Стоп' }));
+
+    expect(stopAdminRoom).not.toHaveBeenCalled();
+  });
+
+  it('disables the room stop button while the request is pending', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.mocked(stopAdminRoom).mockReturnValue(new Promise(() => undefined));
+    renderDashboard();
+    await flushPromises();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Стоп' }));
+
+    expect(screen.getByRole('button', { name: 'Останавливаем...' })).toBeDisabled();
   });
 });

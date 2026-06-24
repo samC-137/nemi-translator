@@ -1,0 +1,11 @@
+services:
+  backend:
+    environment:
+      STT_SEGMENT_MAX_MS: 10000
+      STT_SEGMENT_MIN_MS: 0
+      VAD_PADDING_MS: 650
+      PHRASE_MAX_SENTENCES: 2
+      PHRASE_INACTIVITY_MS: 800
+      PHRASE_MAX_AGE_MS: 10000
+      PHRASE_MAX_CHARS: 300
+      LISTENER_DELAY_MS: 0

@@ -105,6 +105,9 @@ class SystemStatusResponse(BaseModel):
     phraseMinChars: int
     phraseMaxChars: int
     phraseTimeoutMs: int
+    phraseMaxSentences: int
+    phraseInactivityMs: int
+    phraseMaxAgeMs: int
 
 
 class SupportedLanguagesResponse(BaseModel):
@@ -396,6 +399,9 @@ async def system_status(_admin: dict = Depends(require_admin)) -> SystemStatusRe
         phraseMinChars=settings.phrase_min_chars,
         phraseMaxChars=settings.phrase_max_chars,
         phraseTimeoutMs=settings.phrase_timeout_ms,
+        phraseMaxSentences=settings.phrase_max_sentences,
+        phraseInactivityMs=settings.phrase_inactivity_ms,
+        phraseMaxAgeMs=settings.phrase_max_age_ms,
     )
 
 

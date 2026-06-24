@@ -29,7 +29,11 @@ from app.services.runtime import (
     translator,
     translation_glossary,
 )
-from app.services.translation_quality import PhraseAggregator, normalize_translation_text
+from app.services.translation_quality import (
+    PhraseAggregator,
+    PhraseFlush,
+    normalize_translation_text,
+)
 from app.services.vad import VADSegmenter
 
 router = APIRouter()
@@ -63,9 +67,10 @@ async def audio_stream(room_id: str, websocket: WebSocket):
     gemini_session: Optional[GeminiLiveSession] = None
     translation_queue: asyncio.Queue[Optional[tuple[str, int]]] = asyncio.Queue()
     phrase_aggregator = PhraseAggregator(
-        min_chars=settings.phrase_min_chars,
+        max_sentences=settings.phrase_max_sentences,
         max_chars=settings.phrase_max_chars,
-        timeout_ms=settings.phrase_timeout_ms,
+        inactivity_ms=settings.phrase_inactivity_ms,
+        max_age_ms=settings.phrase_max_age_ms,
     )
     phrase_flush_task: Optional[asyncio.Task] = None
     listener_delay_ms = max(0, settings.listener_delay_ms)
@@ -76,23 +81,37 @@ async def audio_stream(room_id: str, websocket: WebSocket):
             return
         await translation_queue.put((phrase, enqueued_ms or int(time.time() * 1000)))
 
-    async def flush_phrase_after_timeout() -> None:
-        while True:
-            await asyncio.sleep(max(0, settings.phrase_timeout_ms) / 1000)
-            phrase = phrase_aggregator.flush_due()
-            if phrase:
-                await enqueue_translation_phrase(phrase)
-                return
-            if not phrase_aggregator.has_pending():
-                return
+    async def enqueue_phrase(result: PhraseFlush) -> None:
+        logger.info(
+            "Phrase flush: room=%s reason=%s age_ms=%s sentences=%s chars=%s",
+            room_id,
+            result.reason,
+            result.age_ms,
+            result.sentence_count,
+            len(result.text),
+        )
+        await enqueue_translation_phrase(result.text)
+
+    async def flush_phrase_at_deadline() -> None:
+        try:
+            while phrase_aggregator.has_pending():
+                deadline_ms = phrase_aggregator.next_deadline_ms()
+                if deadline_ms is None:
+                    return
+                delay_ms = max(0, deadline_ms - int(time.time() * 1000))
+                await asyncio.sleep(delay_ms / 1000)
+                result = phrase_aggregator.flush_due()
+                if result:
+                    await enqueue_phrase(result)
+                    return
+        except asyncio.CancelledError:
+            return
 
     def schedule_phrase_flush() -> None:
         nonlocal phrase_flush_task
-        if settings.phrase_timeout_ms <= 0:
-            return
         if phrase_flush_task and not phrase_flush_task.done():
-            return
-        phrase_flush_task = asyncio.create_task(flush_phrase_after_timeout())
+            phrase_flush_task.cancel()
+        phrase_flush_task = asyncio.create_task(flush_phrase_at_deadline())
 
     async def handle_transcription(text: str) -> None:
         if not text:
@@ -100,11 +119,11 @@ async def audio_stream(room_id: str, websocket: WebSocket):
         logger.info("Transcription received: room=%s text=%s", room_id, text)
         store.append_transcription(room_id, text)
         await _broadcast_transcription(room_id, text)
-        phrase = phrase_aggregator.push(text)
-        if phrase:
+        result = phrase_aggregator.push(text)
+        if result:
             if phrase_flush_task and not phrase_flush_task.done():
                 phrase_flush_task.cancel()
-            await enqueue_translation_phrase(phrase)
+            await enqueue_phrase(result)
         else:
             schedule_phrase_flush()
         latency_ms = latency_tracker.sample(room_id)
@@ -278,7 +297,7 @@ async def audio_stream(room_id: str, websocket: WebSocket):
                     await handle_transcription(text)
         final_phrase = phrase_aggregator.flush()
         if final_phrase:
-            await enqueue_translation_phrase(final_phrase)
+            await enqueue_phrase(final_phrase)
         if phrase_flush_task and not phrase_flush_task.done():
             phrase_flush_task.cancel()
         await translation_queue.put(None)

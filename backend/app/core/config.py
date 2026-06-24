@@ -54,6 +54,9 @@ class Settings:
     phrase_min_chars: int
     phrase_max_chars: int
     phrase_timeout_ms: int
+    phrase_max_sentences: int
+    phrase_inactivity_ms: int
+    phrase_max_age_ms: int
     tts_provider: str
     tts_models: str
     tts_model_path: str
@@ -103,6 +106,9 @@ def load_settings() -> Settings:
         phrase_min_chars=_get_int("PHRASE_MIN_CHARS", 24),
         phrase_max_chars=_get_int("PHRASE_MAX_CHARS", 220),
         phrase_timeout_ms=_get_int("PHRASE_TIMEOUT_MS", 1800),
+        phrase_max_sentences=_get_int("PHRASE_MAX_SENTENCES", 2),
+        phrase_inactivity_ms=_get_int("PHRASE_INACTIVITY_MS", 800),
+        phrase_max_age_ms=_get_int("PHRASE_MAX_AGE_MS", 10_000),
         tts_provider=_get_env("TTS_PROVIDER", "none") or "none",
         tts_models=_get_env("TTS_MODELS", "") or "",
         tts_model_path=_get_env("TTS_MODEL_PATH", "") or "",

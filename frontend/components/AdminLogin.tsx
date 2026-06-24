@@ -24,6 +24,10 @@ export const AdminLogin: React.FC = () => {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError(null);
+    if (!username.trim() || !password.trim()) {
+      setError('Введите логин и пароль');
+      return;
+    }
     setIsLoading(true);
     try {
       const response = await fetch(`${resolveBaseUrl()}/admin/login`, {
@@ -61,20 +65,38 @@ export const AdminLogin: React.FC = () => {
           <p className="text-sm text-gray-400">Доступ только для администраторов</p>
         </div>
         <div className="space-y-4">
-          <input
-            type="text"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            placeholder="Username"
-            className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white placeholder:text-gray-500 focus:border-blue-500/50 focus:outline-none"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Password"
-            className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white placeholder:text-gray-500 focus:border-blue-500/50 focus:outline-none"
-          />
+          <div className="space-y-2">
+            <label htmlFor="admin-username" className="text-sm text-gray-300">
+              Логин
+            </label>
+            <input
+              id="admin-username"
+              name="username"
+              type="text"
+              autoComplete="username"
+              required
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="Username"
+              className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white placeholder:text-gray-500 focus:border-blue-500/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            />
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="admin-password" className="text-sm text-gray-300">
+              Пароль
+            </label>
+            <input
+              id="admin-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Password"
+              className="w-full rounded-xl border border-white/10 bg-black/50 px-4 py-3 text-white placeholder:text-gray-500 focus:border-blue-500/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            />
+          </div>
         </div>
         {error && (
           <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-4 py-2 text-sm text-rose-200">
@@ -84,7 +106,7 @@ export const AdminLogin: React.FC = () => {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full rounded-xl bg-blue-600 py-3 text-white font-semibold hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed transition"
+          className="w-full rounded-xl bg-blue-600 py-3 text-white font-semibold hover:bg-blue-500 disabled:opacity-60 disabled:cursor-not-allowed transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
         >
           {isLoading ? 'Вход...' : 'Войти'}
         </button>

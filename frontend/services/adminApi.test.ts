@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchAdminRooms } from './adminApi';
-import { setAdminToken } from './adminAuth';
+import { getAdminToken, setAdminToken } from './adminAuth';
+
+const ADMIN_UNAUTHORIZED_EVENT = 'nemi:admin-unauthorized';
 
 describe('adminApi', () => {
   beforeEach(() => {
@@ -57,5 +59,18 @@ describe('adminApi', () => {
         })
       ]
     });
+  });
+
+  it('invalidates the admin session when the backend rejects the token', async () => {
+    setAdminToken('expired-token');
+    const unauthorizedListener = vi.fn();
+    window.addEventListener(ADMIN_UNAUTHORIZED_EVENT, unauthorizedListener);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }));
+
+    await expect(fetchAdminRooms()).rejects.toThrow('Требуется повторный вход администратора');
+
+    expect(getAdminToken()).toBeNull();
+    expect(unauthorizedListener).toHaveBeenCalledOnce();
+    window.removeEventListener(ADMIN_UNAUTHORIZED_EVENT, unauthorizedListener);
   });
 });

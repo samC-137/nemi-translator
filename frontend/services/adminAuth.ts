@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'nemi_admin_token';
+export const ADMIN_UNAUTHORIZED_EVENT = 'nemi:admin-unauthorized';
 
 export const getAdminToken = () => {
   if (typeof window === 'undefined') return null;
@@ -13,4 +14,10 @@ export const setAdminToken = (token: string) => {
 export const clearAdminToken = () => {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(STORAGE_KEY);
+};
+
+export const invalidateAdminSession = () => {
+  if (typeof window === 'undefined') return;
+  clearAdminToken();
+  window.dispatchEvent(new Event(ADMIN_UNAUTHORIZED_EVENT));
 };

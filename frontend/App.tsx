@@ -7,7 +7,7 @@ import { ListenerView } from './components/ListenerView';
 import { AdminRoomView, AdminView } from './components/AdminView';
 import { AdminLogin } from './components/AdminLogin';
 import { RoomSession, Language, LANGUAGES } from './types';
-import { getAdminToken } from './services/adminAuth';
+import { ADMIN_UNAUTHORIZED_EVENT, getAdminToken } from './services/adminAuth';
 import { createRoom, joinRoom } from './services/roomsApi';
 
 const LobbyRoute: React.FC = () => {
@@ -159,7 +159,15 @@ const ListenerRoute: React.FC = () => {
 
 const RequireAdmin: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const location = useLocation();
-  if (!getAdminToken()) {
+  const [hasToken, setHasToken] = useState(() => Boolean(getAdminToken()));
+
+  useEffect(() => {
+    const handleUnauthorized = () => setHasToken(false);
+    window.addEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, []);
+
+  if (!hasToken) {
     return <Navigate to="/admin/login" replace state={{ from: location }} />;
   }
   return <>{children}</>;

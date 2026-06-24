@@ -1,5 +1,5 @@
 import { Language, LANGUAGES, RoomStatus } from '../types';
-import { getAdminToken } from './adminAuth';
+import { getAdminToken, invalidateAdminSession } from './adminAuth';
 
 export type AdminRoom = {
   id: string;
@@ -104,6 +104,7 @@ const requestJson = async <T>(path: string, init: RequestInit = {}): Promise<T> 
 
   if (!response.ok) {
     if (response.status === 401 || response.status === 403) {
+      invalidateAdminSession();
       throw new Error('Требуется повторный вход администратора');
     }
     if (response.status === 404) {

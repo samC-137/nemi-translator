@@ -100,25 +100,39 @@ export const AdminView: React.FC = () => {
   const [systemStatus, setSystemStatus] = useState<AdminSystemStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [systemError, setSystemError] = useState<string | null>(null);
 
-  const loadRooms = async () => {
-    setIsLoading(true);
+  const loadRooms = async (showLoading = false) => {
+    if (showLoading) setIsLoading(true);
     setError(null);
     try {
       const data = await fetchAdminRooms();
       setRooms(data.rooms);
       setStats({ total: data.total, live: data.live, listeners: data.listeners });
-      const status = await fetchAdminSystemStatus();
-      setSystemStatus(status);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось загрузить комнаты');
     } finally {
-      setIsLoading(false);
+      if (showLoading) setIsLoading(false);
+    }
+  };
+
+  const loadSystemStatus = async () => {
+    setSystemError(null);
+    try {
+      const status = await fetchAdminSystemStatus();
+      setSystemStatus(status);
+    } catch {
+      setSystemError('Не удалось загрузить статус системы');
     }
   };
 
   useEffect(() => {
-    void loadRooms();
+    void loadRooms(true);
+    void loadSystemStatus();
+    const pollingId = window.setInterval(() => {
+      void loadRooms(false);
+    }, 2000);
+    return () => window.clearInterval(pollingId);
   }, []);
 
   const filteredRooms = useMemo(() => {
@@ -155,7 +169,10 @@ export const AdminView: React.FC = () => {
               Logout
             </button>
             <button
-              onClick={() => void loadRooms()}
+              onClick={() => {
+                void loadRooms(false);
+                void loadSystemStatus();
+              }}
               className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs uppercase tracking-[0.2em] text-gray-400 transition hover:border-white/30 hover:text-white"
             >
               Refresh
@@ -227,6 +244,15 @@ export const AdminView: React.FC = () => {
           </div>
         )}
 
+        {systemError && (
+          <div
+            role="alert"
+            className="rounded-3xl border border-amber-300/40 bg-amber-400/10 px-6 py-4 text-sm text-amber-100"
+          >
+            {systemError}
+          </div>
+        )}
+
         <div className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-black/40 p-5 md:flex-row md:items-center md:justify-between">
           <div className="relative w-full md:max-w-sm">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
@@ -260,7 +286,7 @@ export const AdminView: React.FC = () => {
 
         <div className="flex flex-col gap-4">
           {error && (
-            <div className="rounded-3xl border border-rose-400/40 bg-rose-500/10 px-6 py-4 text-sm text-rose-100">
+            <div role="alert" className="rounded-3xl border border-rose-400/40 bg-rose-500/10 px-6 py-4 text-sm text-rose-100">
               {error}
             </div>
           )}
